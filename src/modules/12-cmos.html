@@ -1,0 +1,156 @@
+<module id="cmos" num="12" part="3" title="Transistors and CMOS logic" short="CMOS" pre="boolean,circuits" blurb="How a MOSFET works, why NMOS pulls down and PMOS pulls up, how CMOS gates are built from dual networks, why inverting gates are natural and NAND beats NOR, and where the delay and power of a chip come from.">
+
+<p>Every gate in the previous modules is, physically, a handful of transistors. Knowing how those transistors behave explains facts that otherwise look arbitrary: why the basic gates are NAND and NOR rather than AND and OR, why fan-in is limited, why a chip's power depends on the square of its supply voltage, and why clock frequencies stopped rising around 2005 while transistor counts kept growing.</p>
+
+<h3>From vacuum tubes to tens of billions of transistors</h3>
+<p>Early electronic computers used vacuum tubes as switches; ENIAC (1945) had about 18,000 of them and consumed around 150 kW. The transistor, invented at Bell Labs in 1947, replaced the tube with a smaller, cooler, more reliable solid-state switch, and the integrated circuit (Kilby and Noyce, 1958–59) put many transistors and their wiring on one piece of silicon. In 1965 Gordon Moore observed that the number of components per chip was doubling at a regular rate, later settled at about every two years; this <b>Moore's law</b> held for five decades through steady shrinking of transistor dimensions.</p>
+<p>The Intel 4004 (1971) had about 2,300 transistors with 10 μm features and ran at 740 kHz. Large chips today have tens of billions: NVIDIA's GA100 GPU has 54 billion, and a recent laptop processor such as Apple's M4 about 28 billion. The transistor itself has changed shape to keep control of the channel as it shrank: from the planar MOSFET to the <b>FinFET</b> (a vertical fin wrapped by the gate on three sides, in production from 2011) to <b>gate-all-around</b> nanosheet transistors, in which the gate surrounds stacked horizontal channels. Process "node" names such as 5 nm or 3 nm are now marketing labels rather than any physical dimension. Growth now also comes from stacking dies vertically (3D integration, high-bandwidth memory) and combining several dies in one package (chiplets).</p>
+
+<h3>Semiconductors and the MOSFET</h3>
+<p>Pure silicon is a poor conductor. <b>Doping</b> it with a small amount of an element with five valence electrons (phosphorus, arsenic) adds free electrons and makes <b>n-type</b> silicon; doping with an element with three (boron) creates <b>holes</b>, missing electrons that move like positive charges, and makes <b>p-type</b> silicon.</p>
+<def term="MOSFET">Metal-oxide-semiconductor field-effect transistor. A voltage on the gate, insulated from the silicon by a thin oxide, creates or removes a conducting channel between the source and drain. The gate draws no DC current: it controls the channel through the electric field across the oxide, like the plate of a capacitor.</def>
+<diagram name="nmos_xsec">An n-channel MOSFET (NMOS). The source and drain are n-type islands in a p-type body; between them, under the gate, there is normally no conducting path.</diagram>
+<p>In an NMOS transistor, a positive gate-to-source voltage V<sub>GS</sub> pushes holes away from the surface under the gate and attracts electrons. Once V<sub>GS</sub> exceeds the <b>threshold voltage</b> V<sub>T</sub> (a few hundred millivolts in modern processes), enough electrons gather to form a thin n-type <b>inversion layer</b>, the channel, connecting source and drain. The transistor's strength is set by its geometry: current scales with the channel width W divided by its length L, and the minimum L is the process's defining dimension.</p>
+<p>A <b>PMOS</b> transistor is the complement: p-type source and drain in an n-type region (an n-well), conducting when the gate is pulled sufficiently <i>below</i> its source, that is, when the gate is low and the source is at V<sub>DD</sub>. Its carriers are holes, which move about two to three times more slowly than electrons, so a PMOS needs roughly twice the width of an NMOS for the same current.</p>
+
+<h3>The switch model, and strong and weak levels</h3>
+<p>For logic, a MOSFET is a voltage-controlled switch: an NMOS is on when its gate is 1 and off when it is 0; a PMOS is on when its gate is 0. The bubble on the PMOS gate in the symbol is a reminder.</p>
+<diagram name="mos_switches">The switch model. "On" means a resistance of a few hundred ohms to a few kilohms; "off" means essentially no current.</diagram>
+<p>The model has one important refinement. An NMOS conducts only while its gate is at least V<sub>T</sub> above its source. When it pulls a node <i>down</i>, the source is at ground and V<sub>GS</sub> = V<sub>DD</sub> throughout, so it pulls the node all the way to 0 V: NMOS passes a <b>strong 0</b>. When it tries to pull a node <i>up</i>, its source is the node itself; as the node rises, V<sub>GS</sub> shrinks, and the transistor turns off when the node reaches V<sub>DD</sub> − V<sub>T</sub>: NMOS passes a <b>weak 1</b>. The PMOS behaves symmetrically, passing a strong 1 and a weak 0. This is why CMOS gates always use NMOS transistors to connect the output to ground and PMOS transistors to connect it to V<sub>DD</sub>.</p>
+
+<h3>Beyond the switch: current and voltage</h3>
+<p>Delay and power calculations need a little more than on and off. An NMOS operates in one of three regions:</p>
+<ul>
+<li><b>Cutoff</b> (V<sub>GS</sub> &lt; V<sub>T</sub>): no channel; only a small leakage current flows.</li>
+<li><b>Linear or triode</b> (V<sub>DS</sub> &lt; V<sub>GS</sub> − V<sub>T</sub>): the channel extends from source to drain and the transistor behaves like a resistor controlled by V<sub>GS</sub>: I<sub>D</sub> = k[(V<sub>GS</sub> − V<sub>T</sub>)V<sub>DS</sub> − V<sub>DS</sub>²/2], with k = μC<sub>ox</sub>W/L.</li>
+<li><b>Saturation</b> (V<sub>DS</sub> ≥ V<sub>GS</sub> − V<sub>T</sub>): the channel pinches off near the drain and the current stops growing with V<sub>DS</sub>: I<sub>D</sub> ≈ (k/2)(V<sub>GS</sub> − V<sub>T</sub>)², the classic square law.</li>
+</ul>
+<diagram name="mos_iv">The long-channel MOSFET characteristic. In modern short-channel devices the carriers reach a maximum velocity, so the saturation current grows closer to linearly with V<sub>GS</sub> − V<sub>T</sub> than quadratically, but the regions are the same.</diagram>
+<p>Two consequences matter for digital design. First, the current a transistor can deliver, and hence how fast it charges a load, grows with W/L and with the gate overdrive V<sub>GS</sub> − V<sub>T</sub>; lowering V<sub>DD</sub> toward V<sub>T</sub> makes circuits dramatically slower. Second, below threshold the current does not drop to zero but decreases exponentially, roughly tenfold for every 60 to 100 mV of V<sub>GS</sub> reduction. That <b>subthreshold leakage</b> is why lowering V<sub>T</sub> to gain speed costs static power.</p>
+
+<h3>Resistor-load logic, and why CMOS replaced it</h3>
+<p>The simplest transistor inverter uses one NMOS to pull the output down and a resistor to pull it up. Series NMOS transistors make a NAND (the output falls only if all are on); parallel ones make a NOR.</p>
+<diagram name="nmos_rload">Resistor-load (NMOS) logic, used in early integrated circuits. The output low voltage is set by a divider between the transistor and the resistor.</diagram>
+<p>When the output is low, the resistor and the on transistor form a divider: V<sub>OL</sub> = V<sub>DD</sub>·R<sub>on</sub>/(R<sub>on</sub> + R), so R must be much larger than R<sub>on</sub>. That divider also conducts continuously: every gate with a low output burns V<sub>DD</sub>²/(R + R<sub>on</sub>). And the rising edge is slow, because the large resistor must charge the load. A million such gates at a few milliwatts each would dissipate kilowatts. CMOS removes both problems by replacing the resistor with a network of PMOS transistors that is on exactly when the NMOS network is off.</p>
+
+<h3>The CMOS inverter</h3>
+<p>A PMOS from V<sub>DD</sub> to the output and an NMOS from the output to ground, with their gates tied together, form the complementary-MOS (CMOS) inverter. Input 0 turns the PMOS on and the NMOS off, pulling the output to V<sub>DD</sub>; input 1 does the opposite. In either steady state one transistor is off, so no current flows from supply to ground, and the outputs reach the rails exactly.</p>
+<diagram name="vtc" args='{"inverting": true, "vdd": 1.0, "k": 16, "label": "CMOS inverter voltage transfer characteristic"}'>The inverter's transfer curve. In the steep middle region both transistors conduct and the gain is far above 1, so small input deviations produce full output swings; outside it, the output sits at a rail.</diagram>
+<p>The point where V<sub>out</sub> = V<sub>in</sub> is the <b>switching threshold</b> V<sub>M</sub>; sizing the PMOS about twice as wide as the NMOS puts it near V<sub>DD</sub>/2 and balances the rise and fall times. The steep transition is what makes digital logic robust (<ref to="digital"/>): the region where |gain| &gt; 1 defines V<sub>IL</sub> and V<sub>IH</sub>, and every gate restores degraded levels to clean rails, so noise does not accumulate through a chain of gates.</p>
+
+<h3>Static CMOS gates: dual networks</h3>
+<p>Every static CMOS gate generalizes the inverter: a <b>pull-down network</b> (PDN) of NMOS transistors between the output and ground, and a <b>pull-up network</b> (PUN) of PMOS transistors between V<sub>DD</sub> and the output. The PDN conducts exactly for the input combinations where the output should be 0, and the PUN is its dual, conducting for exactly the other combinations, so for every input one network drives the output and the other is off.</p>
+<diagram name="cmos_gates">The three basic CMOS gates. Series NMOS (all must be on to pull down) pair with parallel PMOS (any one pulls up), and vice versa.</diagram>
+<p>The construction rule follows from the switch model: transistors in <b>series</b> conduct when all are on, an AND of their gate conditions; transistors in <b>parallel</b> conduct when any is on, an OR. The PDN therefore implements F′ with NMOS (series for AND, parallel for OR), and the PUN is obtained by swapping series and parallel and using PMOS. The PUN's PMOS transistors conduct on complemented inputs, which by De Morgan's theorem is exactly the dual structure.</p>
+<p>Two facts follow directly. A single CMOS stage is always <b>inverting</b>: raising an input can only turn NMOS on and PMOS off, so it can only pull the output down. That is why NAND and NOR are the native gates and AND costs an extra inverter (6 transistors instead of 4). And an n-input NAND or NOR uses <b>2n transistors</b>.</p>
+<ex title="Designing a complex gate">
+<p>Build F = ((A + B)·C)′, an OR-AND-INVERT gate (OAI21), as one CMOS stage.</p>
+<p><b>PDN</b> (implements the expression inside the inversion): A and B in parallel (A + B), in series with C. The output is pulled low when (A or B) and C.</p>
+<p><b>PUN</b> (the dual): A and B in series, the pair in parallel with C, all PMOS. The output is pulled high when C = 0 or when A = B = 0, which is exactly F = C′ + A′B′ = ((A + B)C)′.</p>
+<p>Total: 6 transistors, one gate delay. Building the same function from a 2-input OR (NOR + inverter, 6 transistors) followed by a NAND (4) would use 10 transistors and three stages. Complex AOI and OAI gates are standard cells in every library for this reason.</p>
+</ex>
+<tool name="cmos"/>
+
+<h3>Sizing, fan-in, and why NAND beats NOR</h3>
+<p>Transistors in series add their resistances. To give a gate the same worst-case drive as a reference inverter, a series stack of n transistors must each be about n times wider. In a NAND the series stack is NMOS, the faster type; in a NOR it is PMOS, which is already about twice as weak. A NOR2 sized for equal strength therefore needs PMOS transistors four times the NMOS reference width, presenting more input capacitance per input than a NAND2: by the standard "logical effort" measure, a NAND2 input is 4/3 as hard to drive as an inverter input and a NOR2 input 5/3. Designs favor NAND, and NOR gates with more than about three inputs are avoided.</p>
+<p>The same effect limits <b>fan-in</b>. Adding inputs makes the series stack longer (more resistance) and adds capacitance on internal nodes and the output, so the delay of a gate grows roughly with the square of its fan-in: t<sub>pd</sub> ≈ a<sub>1</sub>·FI + a<sub>2</sub>·FI² + a<sub>3</sub>·FO, where FO is the fanout. In practice gates rarely exceed four or five inputs; a wide AND is built as a tree of NAND and NOR gates, which by De Morgan alternate cleanly.</p>
+<deeper title="Driving a large load: tapered buffers">
+<p>Suppose a small gate must drive a load 64 times its own input capacitance, such as a long bus or a clock net. The delay of each stage is roughly proportional to its <i>electrical effort</i> h, the ratio of load to input capacitance, plus a fixed parasitic term p ≈ 1. Driving 64× directly costs about 64 + 1 = 65 units. Inserting a chain of inverters that each grow 4× (1, 4, 16, driving 64) costs three stages of 4 + 1 = 5 units each, 15 in total. The optimum stage effort is about 4, which is why the delay of an inverter driving four copies of itself, the <b>FO4 delay</b>, is the standard unit for comparing circuit speed across processes. A pipeline stage in a high-frequency processor is on the order of 10 to 20 FO4 delays.</p>
+</deeper>
+
+<h3>Transmission gates and tristate outputs</h3>
+<p>Because an NMOS passes a strong 0 but a weak 1, and a PMOS the reverse, putting one of each in parallel, driven by complementary enable signals, gives a switch that passes both levels fully: a <b>transmission gate</b> (TG). Unlike a logic gate, it does not restore levels; it simply connects two nodes when enabled.</p>
+<diagram name="tgate">A transmission gate and a 2-to-1 multiplexer built from two of them. TG multiplexers are compact (4 transistors plus an inverter for S′) and are the core of CMOS latches and flip-flops.</diagram>
+<p>A <b>tristate</b> output adds a third state to 0 and 1: high impedance (Z), in which both the pull-up and pull-down are off and the output is effectively disconnected. A tristate inverter puts an extra PMOS in series with the pull-up and an extra NMOS in series with the pull-down, both controlled by an enable. Tristate drivers let several devices share a bus, provided exactly one is enabled at a time (<ref to="blocks"/>).</p>
+
+<h3>Where delay comes from</h3>
+<p>A switching gate charges or discharges its load through a transistor's on-resistance, so its delay is approximately 0.69·R<sub>on</sub>·C<sub>load</sub> (<ref to="circuits"/>). C<sub>load</sub> includes the input capacitance of each driven gate (proportional to their transistor widths), the wire, and the gate's own drain capacitance. Making a gate wider lowers R<sub>on</sub> but raises the load on whatever drives it, which is why circuit speed is a chain-wide optimization rather than a property of single gates, and why designers reason in FO4 delays.</p>
+
+<h3>Where power goes</h3>
+<p>CMOS draws no current while idle, apart from leakage, but every output transition moves charge. Charging a load capacitance C<sub>L</sub> from 0 to V<sub>DD</sub> draws C<sub>L</sub>V<sub>DD</sub> of charge from the supply at voltage V<sub>DD</sub>, an energy of C<sub>L</sub>V<sub>DD</sub>²: half ends up stored on the capacitor and half is dissipated in the PMOS. Discharging dumps the stored half into the NMOS.</p>
+<diagram name="cmos_charge">Every full cycle (0 → 1 → 0) of a node costs C<sub>L</sub>V<sub>DD</sub>² of energy, independent of the transistors' resistance.</diagram>
+<p>If a fraction α of the chip's total switched capacitance C makes a 0 → 1 transition each clock cycle (the <b>activity factor</b>), the dynamic power is</p>
+<eq c>P<sub>dynamic</sub> = α · C · V<sub>DD</sub>² · f</eq>
+<p>Two smaller contributions complete the picture. During each transition both networks conduct briefly, causing <b>short-circuit current</b>. And transistors that are off still leak: subthreshold leakage grows exponentially as V<sub>T</sub> is lowered, plus tunneling through the very thin gate oxide. In modern processes static (leakage) power can be a substantial fraction of the total, especially in large, mostly idle structures such as caches.</p>
+<key><p>Power scales with V<sub>DD</sub>² and with frequency, and achievable frequency itself scales roughly with V<sub>DD</sub> (more overdrive, faster switching). Running slower at a lower voltage therefore saves energy per operation, not just power: this is <b>dynamic voltage and frequency scaling</b> (DVFS), used by every modern processor.</p></key>
+<p>For decades, <b>Dennard scaling</b> made each process generation better on every axis: shrinking dimensions and voltage by a factor κ kept power density constant while transistors became faster and more numerous. Around 2005 the supply voltage stopped scaling, because V<sub>T</sub> cannot be lowered further without unacceptable leakage, and power density began to rise with each generation. Clock frequencies plateaued at a few gigahertz, and performance growth shifted to parallelism (multicore CPUs, GPUs) and specialization (<ref to="parallel"/>). Power, not transistor count, became the limiting resource. The standard techniques for managing it:</p>
+<ul>
+<li><b>Clock gating:</b> stop the clock to registers whose values will not change, cutting their α to zero (<ref to="registers"/>).</li>
+<li><b>Power gating:</b> disconnect idle blocks from the supply with large "sleep" transistors, eliminating their leakage, at the cost of losing state and a wake-up delay.</li>
+<li><b>DVFS:</b> lower voltage and frequency when full speed is not needed.</li>
+<li><b>Multi-V<sub>T</sub> design:</b> use fast, leaky low-threshold transistors only on critical paths and slower, low-leakage ones everywhere else.</li>
+</ul>
+
+<h3>Summary</h3>
+<ul>
+<li>NMOS: on when gate = 1, passes strong 0 and weak 1. PMOS: on when gate = 0, passes strong 1. Hence NMOS pull-down, PMOS pull-up.</li>
+<li>Cutoff, triode (resistor-like) and saturation (current ≈ (k/2)(V<sub>GS</sub> − V<sub>T</sub>)²); k ∝ W/L; holes are 2–3× slower than electrons.</li>
+<li>Static CMOS: the PDN implements F′ (series = AND, parallel = OR); the PUN is its dual. Stages are inverting; n-input NAND/NOR use 2n transistors.</li>
+<li>Series stacks are slow; NAND beats NOR because its series stack is NMOS. Delay grows about quadratically with fan-in.</li>
+<li>Transmission gates pass both levels; tristate outputs add a high-impedance state for shared buses.</li>
+<li>P<sub>dynamic</sub> = αCV<sub>DD</sub>²f, plus short-circuit and leakage power. Voltage scaling stalled around 2005, ending frequency growth and making power the central constraint.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>For each transistor type, state whether it conducts when its gate is 1 and when it is 0, and which logic level it passes well.</p></ask>
+<sol><p><b>NMOS:</b> conducts with gate 1, off with gate 0; passes a strong 0. <b>PMOS:</b> conducts with gate 0, off with gate 1; passes a strong 1.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How many transistors are in a static CMOS 3-input NAND? A 3-input AND? A 4-input NOR?</p></ask>
+<sol><p>NAND3: <b>6</b>. AND3 = NAND3 + inverter: <b>8</b>. NOR4: <b>8</b> (though its four series PMOS make it slow; a designer would rather build it as two NOR2s feeding a NAND2 through inverters, or restructure the logic).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>A CMOS gate output drives 10 fF from 0 to 1 V and back. How much energy does the supply deliver during the rising edge, and how much is dissipated over the full cycle?</p></ask>
+<sol><p>Rising edge: the supply delivers C·V² = 10 fF × 1 V² = <b>10 fJ</b>; 5 fJ is stored on the capacitance and 5 fJ dissipated in the PMOS. On the falling edge the stored 5 fJ is dissipated in the NMOS. Total dissipated per full cycle: <b>10 fJ</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A resistor-load NMOS inverter uses R = 10 kΩ and V<sub>DD</sub> = 5 V; the transistor's on-resistance is 500 Ω. Find V<sub>OL</sub> and the static power while the output is low. What would a million such gates, half of them low, dissipate?</p></ask>
+<sol><p>V<sub>OL</sub> = 5 × 500/10,500 = <b>0.24 V</b>. P = 5²/10,500 = <b>2.4 mW</b>. Half a million low gates: about <b>1.2 kW</b>, impossible for one chip. A CMOS gate dissipates essentially nothing while static.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Design the transistor networks for F = ((A + B)·C)′ and for F = (A·(B + C))′. Give the transistor count for each.</p></ask>
+<sol><p>((A + B)C)′: PDN = (A ∥ B) in series with C; PUN = (A series B) ∥ C. (A(B + C))′: PDN = A in series with (B ∥ C); PUN = A ∥ (B series C). <b>6 transistors each</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A chip has 20 nF of total switched capacitance with an activity factor of 0.1, runs at 2 GHz and 1.0 V. Estimate its dynamic power.</p></ask>
+<sol><p>P = αCV²f = 0.1 × 20 × 10⁻⁹ × 1² × 2 × 10⁹ = <b>4 W</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The chip in the previous problem lowers its voltage to 0.8 V and its frequency to 1.6 GHz. By what factor does dynamic power change? Energy per clock cycle? Performance?</p></ask>
+<sol><p>Power ∝ V²f: 0.64 × 0.8 = <b>0.51</b> (about 2 W). Energy per cycle ∝ V²: <b>0.64</b>. Performance ∝ f: <b>0.8</b>. The work gets done more slowly but with 36% less energy, the core argument for DVFS.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A single NMOS transistor with V<sub>T</sub> = 0.3 V is used as a switch to pass a 1 from a 1.0 V signal to a capacitive node, with its gate at 1.0 V. What voltage does the node reach? Why is this a problem for a gate driven by that node, and what fixes it?</p></ask>
+<sol><p>The NMOS turns off once its source (the node) reaches V<sub>G</sub> − V<sub>T</sub> = <b>0.7 V</b>. A degraded 1 reduces noise margin, and in the gate it drives the PMOS is not fully off (its V<sub>GS</sub> is −0.3 V, at threshold), causing static leakage current. A <b>transmission gate</b> (adding a parallel PMOS) passes the full 1.0 V; alternatively, a restoring gate (inverter) follows the pass transistor.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An NMOS has k = 200 μA/V² and V<sub>T</sub> = 0.4 V. What is its saturation current at V<sub>GS</sub> = 1.0 V (square law)? What if W is doubled? What if V<sub>GS</sub> drops to 0.7 V?</p></ask>
+<sol><p>I = (k/2)(V<sub>GS</sub> − V<sub>T</sub>)² = 100 μA × 0.36 = <b>36 μA</b>. Doubling W doubles k: <b>72 μA</b>. At 0.7 V: 100 μA × 0.09 = <b>9 μA</b>, a quarter, showing how strongly speed depends on gate overdrive.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>With holes half as mobile as electrons, size a NAND2 and a NOR2 so each has the drive of an inverter with a 1-unit NMOS and 2-unit PMOS. Compare the input capacitance per input (proportional to total gate width on that input).</p></ask>
+<sol><p><b>NAND2:</b> two series NMOS each 2 units; two parallel PMOS each 2 units (one alone must match the inverter). Per input: 2 + 2 = <b>4 units</b>. <b>NOR2:</b> two parallel NMOS each 1 unit; two series PMOS each 4 units. Per input: 1 + 4 = <b>5 units</b>. Relative to the inverter's 3 units, the logical efforts are 4/3 and 5/3: the NOR is harder to drive and larger.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The Intel 4004 (1971) had about 2,300 transistors. If transistor counts doubled exactly every two years, how many would a chip have in 2021? Compare with real chips of that year.</p></ask>
+<sol><p>50 years = 25 doublings: 2,300 × 2²⁵ ≈ 2,300 × 3.36 × 10⁷ ≈ <b>7.7 × 10¹⁰</b>, about 77 billion. The largest chips around 2021–2022 had roughly 50 to 80 billion transistors, so the trend held remarkably well for half a century.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An inverter has V<sub>OL</sub> = 0.05 V, V<sub>OH</sub> = 0.95 V, V<sub>IL</sub> = 0.42 V and V<sub>IH</sub> = 0.58 V at V<sub>DD</sub> = 1 V. What are its noise margins? Why does a steeper transfer curve improve them?</p></ask>
+<sol><p>NM<sub>L</sub> = 0.42 − 0.05 = <b>0.37 V</b>; NM<sub>H</sub> = 0.95 − 0.58 = <b>0.37 V</b>. V<sub>IL</sub> and V<sub>IH</sub> are where the gain magnitude is 1; a steeper curve (higher gain) squeezes them together toward V<sub>M</sub>, widening both margins toward V<sub>DD</sub>/2.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A gate with input capacitance C must drive a load of 64C. Compare the delay of driving it directly with driving it through a chain of inverters whose sizes grow by 4× per stage, assuming each stage's delay is (load/input capacitance) + 1 in units of τ.</p></ask>
+<sol><p>Direct: 64 + 1 = <b>65τ</b>. Chain: the original gate drives an inverter of 4C, which drives 16C, which drives the 64C load: three stages with effort 4, each costing 4 + 1 = 5τ, total <b>15τ</b>, over 4× faster. Adding stages helps until the per-stage effort falls to about 4; beyond that the fixed parasitic delay of extra stages dominates.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Implement F = A·B + C (not inverted) in static CMOS with the fewest transistors. Explain why the obvious approach from earlier modules (an AND gate feeding an OR gate) is worse.</p></ask>
+<sol><p>Build the inverting complex gate AOI21, (AB + C)′, with 6 transistors (PDN: A series B, in parallel with C; PUN: (A ∥ B) in series with C), then invert: <b>8 transistors, two stages</b>. AND (6 transistors: NAND + INV) followed by OR (6: NOR + INV) uses 12 transistors in four stages. Since every CMOS stage inverts, efficient designs absorb inversions into complex gates rather than building AND and OR literally.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A processor at 0.8 V draws 40 W of dynamic power and 6 A of leakage current. What is its total power? If half the chip is idle and clock-gated, how does power change? What if the idle half is power-gated instead?</p></ask>
+<sol><p>Leakage power = 0.8 V × 6 A = 4.8 W; total <b>44.8 W</b>. Clock gating the idle half removes its dynamic power (assuming it is uniformly half): 20 + 4.8 = <b>24.8 W</b>; the leakage remains because the transistors are still powered. Power gating removes both its dynamic power and its leakage: 20 + 2.4 = <b>22.4 W</b>, but the gated half loses its state and needs time to wake up.</p></sol>
+</prob>
+</practice>
+</module>

@@ -1,0 +1,122 @@
+<module id="chipflow" num="28" part="7" title="From design to silicon: fabrication, test, power and heat" short="Chip design and manufacturing" pre="verilog,cmos" blurb="How a design becomes working chips: the ASIC flow from specification through synthesis and physical design to signoff, fabrication and yield economics, chiplets and packaging, manufacturing test with scan, and the power delivery, thermal and reliability limits every chip must respect.">
+
+<p>Integrated circuits range from a 74HCT00, four NAND gates built from 16 transistors, to processors with tens of billions of transistors, such as NVIDIA's GA100 GPU (54 billion, 128 multiprocessors) and Apple's M4 (28 billion). Designing at that scale is possible only because of a disciplined flow of tools and checks that turns RTL code into a manufacturable layout, and because manufacturing, test and packaging are engineered as carefully as the logic. This module follows a design from specification to a tested part and covers the physical limits, power and heat, that shape every modern chip.</p>
+
+<h3>The ASIC design flow</h3>
+<diagram name="design_flow">The main stages of an ASIC project. Verification and timing closure are iterative: problems found late send the design back to earlier steps.</diagram>
+<ul>
+<li><b>Specification and architecture.</b> Requirements are set as targets for power, performance and area (PPA), plus cost and schedule. Architects partition the design into blocks, define interfaces, and budget each block's timing, area and power. Decisions here (how many cores, cache sizes, which accelerators) matter far more than any later optimization.</li>
+<li><b>RTL design</b> in Verilog, SystemVerilog or VHDL (<ref to="verilog"/>).</li>
+<li><b>Verification</b> establishes that the RTL does what the specification says: simulation with self-checking, constrained-random testbenches; coverage measurement; formal verification, which proves properties for all inputs; and emulation or FPGA prototyping to run real software before silicon exists. Verification usually consumes more effort than design.</li>
+<li><b>Logic synthesis</b> maps RTL onto a <b>standard-cell library</b>: hundreds of pre-designed gates, flip-flops and complex cells, each characterized for delay, power and area at every combination of process, voltage and temperature (PVT corner). Timing constraints (clock periods, I/O delays) steer the optimization.</li>
+<li><b>Design for test</b> (DFT) inserts scan chains and built-in self-test so that manufactured chips can be tested (below).</li>
+<li><b>Physical design</b>: floorplanning places large blocks, I/O and the power grid; placement positions millions of cells; clock tree synthesis builds a balanced clock network to control skew (<ref to="timing"/>); routing connects everything on 10 to 15 or more metal layers, thin ones near the transistors for local wires and thick ones on top for power and long global wires.</li>
+<li><b>Signoff</b> confirms the final layout: static timing analysis at every PVT corner, power and voltage-drop analysis, electromigration checks, design-rule checks (DRC: spacing, width and density rules of the process), and layout-versus-schematic (LVS: the layout implements exactly the netlist).</li>
+<li><b>Tapeout</b> sends the layout database to the foundry. Fabrication takes about three months; then wafers are tested, diced, packaged and tested again.</li>
+</ul>
+
+<h3>Fabrication</h3>
+<p>Chips are made on silicon wafers, today 300 mm in diameter, in hundreds of process steps. Each layer is patterned by <b>photolithography</b>: a light-sensitive resist is exposed through a mask, developed, and the pattern is transferred by etching, deposition or ion implantation; chemical-mechanical polishing flattens the surface for the next layer. Leading-edge processes use extreme-ultraviolet (EUV) light at 13.5 nm for the finest layers. The front end of line builds the transistors; the back end of line builds the metal interconnect above them. A leading-edge design needs dozens of masks, and a full mask set costs on the order of tens of millions of dollars, which is the main reason ASICs require high volumes (<ref to="memory"/>).</p>
+
+<h3>Yield and the cost of a die</h3>
+<p>Manufacturing defects (particles, pattern failures) land randomly on the wafer. A die that contains a killer defect does not work. If defects have density D per unit area and the die area is A, a simple Poisson model gives the fraction of good dies:</p>
+<eq c>yield ≈ e<sup>−D·A</sup></eq>
+<diagram name="yield_wafer">The same 26 defects on the same wafer: most small dies escape them, most large dies do not.</diagram>
+<p>Larger dies therefore cost more than proportionally. The number of dies per wafer is roughly the wafer area divided by the die area, minus partial dies around the edge (about π·d/√(2A) for wafer diameter d), and the cost of each <i>good</i> die is the wafer cost divided by the number of good dies.</p>
+<ex title="Small die versus large die">
+<p>A 300 mm wafer costs $17,000 and the process has D = 0.1 defects/cm².</p>
+<p>A 100 mm² die: about 707 − 67 ≈ 640 dies per wafer; yield e<sup>−0.1</sup> = 90.5%; 579 good dies; <b>about $29 each</b>.</p>
+<p>A 600 mm² die: about 118 − 27 ≈ 90 dies per wafer; yield e<sup>−0.6</sup> = 54.9%; 49 good dies; <b>about $347 each</b>: twelve times the cost for six times the area.</p>
+</ex>
+<p>This is the economic case for <b>chiplets</b>: building a large system from several smaller dies, each tested before assembly (known-good die), and connecting them inside one package. Memory, I/O and compute can also be made in different processes, each suited to its job. Large chips that remain monolithic recover yield with redundancy, such as spare cache rows or extra cores that can be disabled, which is why products often ship with some units fused off.</p>
+
+<h3>Packaging</h3>
+<p>The package connects the die to the board, spreads its heat and protects it. Older packages connect pads on the die's edge with wire bonds; high-performance chips are mounted face-down (<b>flip chip</b>) on an array of solder bumps covering the whole die, giving thousands of power and signal connections with low inductance. In <b>2.5D</b> packaging several dies sit side by side on a silicon interposer with very dense wiring, the way GPUs connect to stacks of high-bandwidth memory (<ref to="memory"/>). In <b>3D</b> stacking, dies are bonded on top of each other and connected by through-silicon vias or direct hybrid bonding. Standard die-to-die interfaces such as UCIe let chiplets from different sources interoperate.</p>
+
+<h3>Manufacturing test</h3>
+<p>Verification asks whether the design is correct; <b>manufacturing test</b> asks whether a particular manufactured chip matches the design. Every die is tested, so tests must be fast and must detect defects with high probability. Defects are modeled as faults, most simply as <b>stuck-at faults</b>, in which a wire behaves as if permanently tied to 0 or 1. A test pattern detects a fault if the faulty circuit's output differs from the correct one: a stuck-at-0 fault on an AND gate's output is detected only by the input 11, the one pattern for which the good output is 1.</p>
+<p>The difficulty is reaching deep internal logic from the pins. <b>Scan design</b> solves it: every flip-flop gets a multiplexer in front of its D input, and in test mode the flip-flops are chained into long shift registers. The tester shifts a pattern into all flip-flops, applies one functional clock to capture the logic's response, and shifts the result out while shifting the next pattern in. Automatic test-pattern generation (ATPG) computes compact pattern sets that reach well over 99% fault coverage.</p>
+<diagram name="scan_chain">Scan turns every flip-flop into a directly controllable and observable point, so sequential logic can be tested like combinational logic.</diagram>
+<p>Memories are tested by built-in self-test (BIST) engines that run march algorithms writing and reading patterns through every cell. JTAG boundary scan, a standard serial test port, lets boards test the connections between chips. Parts are also <b>speed-binned</b>: tested at several frequencies and voltages and sold as different products according to how fast they run.</p>
+
+<h3>Power delivery</h3>
+<p>A large processor can draw hundreds of amperes at under one volt, and that current changes by tens of amperes within nanoseconds as activity changes. Voltage regulators on the board (and increasingly inside the package) convert higher supply voltages down; a dense mesh of wide upper-metal wires distributes power across the die. Two effects reduce the voltage the transistors actually see: resistive <b>IR drop</b> in the grid (100 A through 0.5 mΩ is 50 mV, over 6% of a 0.8 V supply) and inductive <b>droop</b> from L·di/dt when current steps (<ref to="circuits"/>). Decoupling capacitance at every level, from the board to on-die capacitors, supplies fast current transients, and the timing analysis must assume the lowest voltage the grid can reach. Power gating and dynamic voltage and frequency scaling manage the power drawn in the first place (<ref to="cmos"/>).</p>
+
+<h3>Heat</h3>
+<p>Nearly all electrical power consumed by a chip becomes heat, which must flow from the transistors (the junction) through the package and heatsink to the air or coolant. Each part of that path has a <b>thermal resistance</b> θ in °C/W, and temperature differences follow the thermal equivalent of Ohm's law, ΔT = P·θ:</p>
+<diagram name="thermal_chain">The thermal path. Resistances in series add, exactly like electrical resistances.</diagram>
+<p>A processor dissipating 250 W through θ<sub>JC</sub> = 0.1, θ<sub>CS</sub> = 0.05 and θ<sub>SA</sub> = 0.15 °C/W with 25 °C air reaches T<sub>J</sub> = 25 + 250 × 0.3 = 100 °C. Typical maximum junction temperatures are around 95 to 110 °C. When the limit is approached, the chip <b>throttles</b>, lowering its frequency and voltage. Temperature also feeds back into power: leakage current rises steeply with temperature, so a hotter chip leaks more and gets hotter still; designs must ensure this loop settles rather than running away. The maximum sustained power a cooling system is designed to remove is the thermal design power (TDP), and the inability to power and cool every transistor at once is why parts of large chips are idle at any moment ("dark silicon").</p>
+
+<h3>Reliability</h3>
+<ul>
+<li><b>Electromigration:</b> high current density gradually moves metal atoms in wires, eventually opening or shorting them. Signoff limits current density in every wire.</li>
+<li><b>Aging:</b> transistors slowly shift their threshold voltages under stress (bias temperature instability, hot carriers), so circuits slow down over years; designs include timing margin for end-of-life conditions.</li>
+<li><b>Soft errors:</b> alpha particles from packaging materials and neutrons from cosmic rays can flip bits in SRAM, DRAM and flip-flops without permanent damage. Memories are protected with error-correcting codes.</li>
+</ul>
+<p>The standard code is a <b>Hamming code</b> extended with an overall parity bit, SECDED (single-error correcting, double-error detecting). In a Hamming code, check bits sit at the power-of-two positions 1, 2, 4, 8, …, and check bit 2ᵏ is the parity of every position whose index has bit k set; when a single bit flips, recomputing the checks gives a syndrome equal to the position of the flipped bit. Protecting 64 data bits takes 7 Hamming check bits plus 1 overall parity bit: the common (72, 64) code with 12.5% overhead.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>ASIC flow: specification and architecture, RTL, verification, synthesis, DFT, physical design (floorplan, place, clock tree, route), signoff (STA, power, DRC, LVS), tapeout, fabrication, test and packaging.</li>
+<li>Yield ≈ e<sup>−DA</sup>; cost per good die grows faster than area, motivating chiplets and redundancy.</li>
+<li>Packaging ranges from wire bond to flip chip, 2.5D interposers with HBM and 3D stacking.</li>
+<li>Manufacturing test uses fault models, scan chains and ATPG; memories use BIST; boards use JTAG.</li>
+<li>Power delivery fights IR drop and L·di/dt droop; heat flows through series thermal resistances, T<sub>J</sub> = T<sub>A</sub> + P·Σθ.</li>
+<li>Reliability threats include electromigration, aging and soft errors; SECDED ECC protects memories.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Put these steps in order: routing, RTL design, tapeout, logic synthesis, placement, specification, signoff, verification.</p></ask>
+<sol><p>Specification → RTL design → verification → logic synthesis → placement → routing → signoff → tapeout. (Verification continues alongside later steps, and failures loop back.)</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>A chip dissipates 100 W with a total junction-to-ambient thermal resistance of 0.5 °C/W in 25 °C air. What is its junction temperature?</p></ask>
+<sol><p>T<sub>J</sub> = 25 + 100 × 0.5 = <b>75 °C</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>With a defect density of 0.2 defects/cm², what fraction of 2 cm² dies are good? Of 0.5 cm² dies?</p></ask>
+<sol><p>e<sup>−0.4</sup> ≈ <b>67%</b>; e<sup>−0.1</sup> ≈ <b>90%</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Which input pattern(s) detect a stuck-at-0 fault on the output of a 2-input AND gate? A stuck-at-1 fault on input A?</p></ask>
+<sol><p>Output stuck-at-0: only <b>A B = 11</b> (the good output is 1, the faulty one 0). Input A stuck-at-1: the pattern must set A = 0 and make A matter, so B = 1: <b>A B = 01</b> (good output 0, faulty output 1).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>How does manufacturing test differ from functional verification?</p></ask>
+<sol><p>Verification checks that the <b>design</b> meets its specification, before fabrication, and needs to be done once. Manufacturing test checks that each <b>fabricated chip</b> matches the verified design, on every unit, quickly and cheaply, using fault models and structures such as scan to reach internal nodes.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Estimate dies per wafer, yield, good dies and cost per good die for a 200 mm² die on a 300 mm wafer costing $17,000 with D = 0.1/cm². Use dies ≈ πr²/A − πd/√(2A).</p></ask>
+<sol><p>πr²/A = π × 150²/200 ≈ 353.4; edge loss π × 300/√400 = 47.1; about <b>306 dies</b>. Yield e<sup>−0.2</sup> = <b>81.9%</b> → about <b>250 good dies</b> → <b>$68 each</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 250 W processor has θ<sub>JC</sub> = 0.1 and θ<sub>CS</sub> = 0.05 °C/W. In 35 °C air, what heatsink thermal resistance θ<sub>SA</sub> keeps the junction at or below 95 °C?</p></ask>
+<sol><p>Allowed rise 95 − 35 = 60 °C → total θ ≤ 60/250 = 0.24 °C/W → θ<sub>SA</sub> ≤ 0.24 − 0.15 = <b>0.09 °C/W</b>, which requires a large heatsink with strong airflow or liquid cooling.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Encode the 4-bit value 1011 (d1 d2 d3 d4) with a Hamming (7,4) code, positions 1–7 = p1 p2 d1 p4 d2 d3 d4, using even parity: p1 covers positions 1, 3, 5, 7; p2 covers 2, 3, 6, 7; p4 covers 4, 5, 6, 7. Then show how an error in position 6 is located.</p></ask>
+<sol><p>d1 = 1 (pos 3), d2 = 0 (pos 5), d3 = 1 (pos 6), d4 = 1 (pos 7). p1 = d1 ⊕ d2 ⊕ d4 = 1 ⊕ 0 ⊕ 1 = 0; p2 = d1 ⊕ d3 ⊕ d4 = 1 ⊕ 1 ⊕ 1 = 1; p4 = d2 ⊕ d3 ⊕ d4 = 0 ⊕ 1 ⊕ 1 = 0. Codeword (positions 1–7): <b>0 1 1 0 0 1 1</b>. If position 6 flips (0 1 1 0 0 0 1), recomputing: check 1 (positions 1, 3, 5, 7) = 0 ⊕ 1 ⊕ 0 ⊕ 1 = 0; check 2 (2, 3, 6, 7) = 1 ⊕ 1 ⊕ 0 ⊕ 1 = 1; check 4 (4, 5, 6, 7) = 0 ⊕ 0 ⊕ 0 ⊕ 1 = 1. Syndrome (c4 c2 c1) = 110 = <b>6</b>: flip position 6 back.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A chip has 10,000 scan flip-flops arranged in 10 chains of 1000. Testing needs 5,000 patterns with a 50 MHz scan clock. Roughly how long does the scan test take? How would you cut the time?</p></ask>
+<sol><p>Each pattern needs about 1000 shift cycles (loading the next pattern while unloading the previous result) plus a capture cycle: ≈ 5000 × 1001 ≈ 5 × 10⁶ cycles at 20 ns = <b>about 0.1 s</b>. Use more, shorter chains (more test pins), a faster scan clock, or on-chip test compression that expands a few tester channels into many internal chains.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A chip draws 100 A at 0.8 V and its power grid has an effective resistance of 0.5 mΩ from the regulator to the transistors. What is the IR drop, as a fraction of the supply? Why does it matter for timing?</p></ask>
+<sol><p>100 A × 0.5 mΩ = <b>50 mV</b>, <b>6.25%</b> of 0.8 V. Gate delay rises as the supply voltage falls (less gate overdrive), so timing must be verified at the lowest voltage the transistors actually see; otherwise paths that pass at the nominal voltage fail in operation.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Compare silicon cost per good product for a 600 mm² monolithic die and for four 150 mm² chiplets with D = 0.1/cm², assuming chiplets are tested before assembly and ignoring edge loss and packaging costs.</p></ask>
+<sol><p>Monolithic: yield e<sup>−0.6</sup> = 0.549, so each good product consumes 600/0.549 ≈ <b>1093 mm²</b> of processed silicon. Chiplets: yield e<sup>−0.15</sup> = 0.861 each, and only good chiplets are assembled, so 4 × 150/0.861 ≈ <b>697 mm²</b>, about 36% less. The savings are offset by the interconnect area on each chiplet, the advanced package, and die-to-die communication power, which is why the trade-off favors chiplets mainly for very large designs.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Explain thermal runaway in terms of leakage, and why a cooling system that is adequate at 25 °C ambient might fail at 45 °C.</p></ask>
+<sol><p>Leakage current grows roughly exponentially with temperature. Higher temperature increases leakage power, which raises temperature further through P·θ. At low temperature the loop converges: the extra heat raises temperature only slightly. Above some point the leakage increase per degree exceeds what the cooling removes per degree, and temperature runs away until throttling or damage. A higher ambient starts the chip closer to that point, so the same heatsink that settles comfortably at 25 °C may not reach equilibrium at 45 °C. Throttling (DVFS) and thermal sensors guard against it.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Why does a (72, 64) SECDED code use 8 check bits? How many check bits would a single-error-correcting code need for 32 data bits?</p></ask>
+<sol><p>A Hamming code with r check bits can identify 2ʳ − 1 single-bit error positions, so it needs 2ʳ ≥ m + r + 1 for m data bits. For m = 64: r = 7 (128 ≥ 72). One more overall parity bit distinguishes single errors (correctable) from double errors (detectable): <b>8</b>. For 32 data bits: r = 6 (64 ≥ 39), so <b>6</b> for SEC, 7 with double-error detection (a (39, 32) code).</p></sol>
+</prob>
+</practice>
+</module>

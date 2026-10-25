@@ -1,0 +1,182 @@
+<module id="float" num="4" part="1" title="Fixed point and floating point" short="Fixed and floating point" pre="numbers,signed" blurb="How hardware represents fractions and very large or small numbers: fixed-point formats and their arithmetic, the IEEE 754 floating-point encoding field by field, special values, precision and rounding, the classic floating-point pitfalls, and the reduced-precision formats used in machine-learning hardware.">
+
+<p>Integers cover counting and addressing, but sensor readings, audio samples, physics and neural-network weights need fractions and a wide range of magnitudes. There are two ways to represent them in binary. <b>Fixed point</b> places the radix point at a fixed position agreed in advance, so it is really integer arithmetic with an implied scale factor; it is cheap and exact within its range. <b>Floating point</b> stores a number in binary scientific notation, with its own exponent, so it covers an enormous range at a roughly constant relative precision. This module covers both, with most of the attention on the IEEE 754 standard that every modern processor implements.</p>
+
+<h3>Fixed point</h3>
+<p>A fixed-point format reserves m bits for the integer part and f bits for the fraction, written <b>Qm.f</b> (sometimes counting the sign bit separately). The stored bits are an ordinary integer N; the value is N × 2<sup>−f</sup>.</p>
+<ex title="Reading and writing Q4.4">
+<p>In unsigned Q4.4 (8 bits, 4 integer and 4 fraction bits), 0x58 = 0101.1000₂ = 5 + ½ = <b>5.5</b>, which is also 88 / 16. The <b>resolution</b>, the gap between adjacent values, is 2⁻⁴ = 0.0625, and the range is 0 to 15.9375. To store 3.3, compute 3.3 × 16 = 52.8 and round to 53 = 0x35, which represents 3.3125: the quantization error is 0.0125.</p>
+</ex>
+<p>Fixed-point arithmetic is integer arithmetic plus bookkeeping of the binary point:</p>
+<ul>
+<li><b>Addition and subtraction</b> need both operands in the same format; then the integer adder gives the right answer directly.</li>
+<li><b>Multiplication</b> of a Qa.b by a Qc.d value gives a Q(a+c).(b+d) product, twice as many fraction bits. To return to the original format, shift right by the extra fraction bits (rounding if needed) and check that the integer part still fits. Example in Q4.4: 2.5 × 1.75 is 0x28 × 0x1C = 40 × 28 = 1120 = 0x460, a Q8.8 number worth 1120 / 256 = 4.375; shifting right by 4 gives 70 = 0x46 = 4.375 in Q4.4.</li>
+<li><b>Signed fixed point</b> uses a two's complement integer: an 8-bit signed Q3.4 covers −8 to +7.9375.</li>
+</ul>
+<prac>
+<p>Fixed point is the norm on microcontrollers without a floating-point unit (including 8-bit AVRs, where every float operation is a slow software routine), in DSP code, and in neural-network inference, where weights are quantized to 8-bit integers with a scale factor: real value = scale × (q − zero_point). It gives exact, predictable results and costs only integer hardware, but the programmer must manage range and precision by hand.</p>
+</prac>
+
+<h3>Binary scientific notation</h3>
+<p>Floating point stores a number the way scientific notation writes it: a sign, a significand, and an exponent. In binary, any nonzero number can be <b>normalized</b> so that the significand has exactly one 1 before the binary point:</p>
+<eq>x = (−1)<sup>s</sup> × 1.f × 2<sup>E</sup></eq>
+<p>For example, 6.75 = 110.11₂ = 1.1011₂ × 2². Because a normalized binary significand always starts with 1, that bit does not need to be stored. It is called the <b>hidden bit</b> (or implicit leading 1), and it gives one extra bit of precision for free.</p>
+
+<h3>IEEE 754 single precision (FP32)</h3>
+<p>The IEEE 754 standard defines the formats and rounding rules used by essentially all hardware. Single precision packs a number into 32 bits:</p>
+<diagram name="fp_layout">The three fields of FP32, FP16 and BF16, each holding −6.75 = −1.1011₂ × 2². Only the bits after the hidden 1 are stored in the fraction field, left-justified and padded with zeros.</diagram>
+<grid>Field | Bits | Meaning
+sign s | 1 (bit 31) | 0 for positive, 1 for negative: sign-magnitude, not two's complement
+exponent e | 8 (bits 30–23) | the true exponent plus a bias of 127, stored as an unsigned number
+fraction f | 23 (bits 22–0) | the bits after the binary point of the normalized significand</grid>
+<eq>value = (−1)<sup>s</sup> × 1.f × 2<sup>e − 127</sup>        for 1 ≤ e ≤ 254</eq>
+<p>The exponent is stored in excess-127 form rather than two's complement so that the whole word, read as a sign bit followed by an unsigned integer, sorts in the same order as the values it represents (for positive numbers). Hardware can compare floating-point numbers with integer comparators, and larger exponents always mean larger magnitudes.</p>
+<ex title="Encoding −6.75">
+<ol class="steps">
+<li>Convert the magnitude to binary: 6.75 = 110.11₂.</li>
+<li>Normalize: 110.11 = 1.1011 × 2². The true exponent is E = 2.</li>
+<li>Bias the exponent: e = 2 + 127 = 129 = 1000 0001₂.</li>
+<li>Fraction: the bits after the point, 1011, padded to 23 bits: 1011 0000 0000 0000 0000 000.</li>
+<li>Sign: negative, so s = 1. Assemble: 1 10000001 10110000000000000000000 = <span class="m">1100 0000 1101 1000 0…</span> = <b>0xC0D80000</b>.</li>
+</ol>
+</ex>
+<ex title="Decoding 0x41480000">
+<p>0x41480000 = 0100 0001 0100 1000 0000 … Split: s = 0, e = 1000 0010 = 130, f = 1001 000…. Value = 1.1001₂ × 2<sup>130 − 127</sup> = 1.1001 × 2³ = 1100.1₂ = <b>12.5</b>.</p>
+</ex>
+<p>Other values worth recognizing: 1.0 = 0x3F800000 (e = 127, f = 0), 2.0 = 0x40000000, −2.5 = 0xC0200000, and 0.15625 = 1.01₂ × 2⁻³ = 0x3E200000.</p>
+
+<h3>Special values</h3>
+<p>The two extreme exponent fields, all zeros and all ones, are reserved:</p>
+<grid>Exponent field e | Fraction f | Meaning
+0 | 0 | ±0 (two zeros, distinguished by the sign bit; they compare equal)
+0 | ≠ 0 | <b>subnormal</b>: (−1)<sup>s</sup> × 0.f × 2<sup>−126</sup>, no hidden 1
+1 to 254 | any | normal number: (−1)<sup>s</sup> × 1.f × 2<sup>e − 127</sup>
+255 | 0 | ±∞ (overflow, or a nonzero number divided by zero)
+255 | ≠ 0 | NaN, "not a number" (0/0, ∞ − ∞, √−1)</grid>
+<p><b>Subnormal</b> (denormalized) numbers fill the gap between the smallest normal number, 2⁻¹²⁶ ≈ 1.18 × 10⁻³⁸, and zero, so that values shrink gradually instead of jumping to zero ("gradual underflow"); the smallest is 2⁻¹⁴⁹ ≈ 1.4 × 10⁻⁴⁵. NaN has the unique property that it is unequal to everything, including itself, so <code>x != x</code> is true exactly when x is NaN.</p>
+
+<h3>Range, precision and spacing</h3>
+<grid>Format | Sign / exponent / fraction | Bias | Largest finite | Smallest normal | Decimal digits
+FP32 (single) | 1 / 8 / 23 | 127 | ≈ 3.40 × 10³⁸ | ≈ 1.18 × 10⁻³⁸ | about 7.2
+FP64 (double) | 1 / 11 / 52 | 1023 | ≈ 1.80 × 10³⁰⁸ | ≈ 2.23 × 10⁻³⁰⁸ | about 16.0
+FP16 (half) | 1 / 5 / 10 | 15 | 65,504 | ≈ 6.10 × 10⁻⁵ | about 3.3
+BF16 (bfloat16) | 1 / 8 / 7 | 127 | ≈ 3.39 × 10³⁸ | ≈ 1.18 × 10⁻³⁸ | about 2.4</grid>
+<p>The number of significant decimal digits comes from the significand width including the hidden bit: FP32 has 24 bits, and log₁₀(2²⁴) ≈ 7.2. Floating-point values are not evenly spaced. Within each <b>binade</b> (the range from 2<sup>E</sup> to 2<sup>E+1</sup>) there are exactly 2²³ equally spaced FP32 values, so the spacing doubles each time the magnitude doubles.</p>
+<diagram name="float_spacing">Every positive value of a toy 6-bit format (3 exponent bits, 2 fraction bits). Between 1 and 2 the spacing is 0.25; between 8 and 16 it is 2. Relative precision stays roughly constant while absolute precision varies by orders of magnitude. The orange ticks near zero are subnormals, evenly spaced.</diagram>
+<def term="Unit in the last place (ulp)">
+<p>The gap between a floating-point number and the next larger representable number. For a normal FP32 value with true exponent E, one ulp is 2<sup>E − 23</sup>. The ulp of 1.0 is the <b>machine epsilon</b>: 2⁻²³ ≈ 1.19 × 10⁻⁷ for FP32 and 2⁻⁵² ≈ 2.2 × 10⁻¹⁶ for FP64.</p>
+</def>
+<p>One consequence surprises people: FP32 represents every integer exactly only up to 2²⁴ = 16,777,216. Above that, the ulp is 2, so 16,777,217 cannot be stored and rounds to 16,777,216. A float loop counter that is incremented by 1 stops increasing there. FP64 is exact for integers up to 2⁵³.</p>
+
+<h3>Rounding</h3>
+<p>Most real numbers fall between two representable values, so every floating-point operation rounds its exact result. The default IEEE mode is <b>round to nearest, ties to even</b>: pick the closer representable neighbor, and on an exact tie pick the one whose last fraction bit is 0, which avoids a systematic upward bias. The error of a single correctly rounded operation is at most half an ulp of the result.</p>
+<p>0.1 has an infinite repeating binary expansion (<ref to="numbers"/>), so it is always rounded. Stored as FP32 it is exactly 0.100000001490116119384765625. In FP64, 0.1 + 0.2 evaluates to 0.30000000000000004, while 0.3 is stored as 0.299999999999999988898…, so <code>0.1 + 0.2 == 0.3</code> is false.</p>
+<tool name="float"/>
+
+<h3>Floating-point arithmetic and its pitfalls</h3>
+<p>Adding two floating-point numbers takes several steps, which is why an FP adder is much larger and slower than an integer adder:</p>
+<ol class="steps">
+<li><b>Align:</b> shift the significand of the operand with the smaller exponent right until the exponents match.</li>
+<li><b>Add or subtract</b> the significands (sign-magnitude arithmetic).</li>
+<li><b>Normalize:</b> shift the result so it again has the form 1.f, adjusting the exponent.</li>
+<li><b>Round</b> to the available fraction bits, which can itself carry and require one more normalization.</li>
+</ol>
+<p>Multiplication is simpler in structure: XOR the signs, add the exponents (subtracting one bias), multiply the significands, then normalize and round. A <b>fused multiply-add</b> (FMA) computes a × b + c with a single rounding at the end, which is both faster and more accurate than a separate multiply and add; it is the core operation of matrix and neural-network hardware.</p>
+<p>Because every step rounds, floating-point arithmetic does not obey the usual algebraic laws:</p>
+<ul>
+<li><b>Not associative.</b> (10²⁰ + (−10²⁰)) + 1 = 1, but 10²⁰ + ((−10²⁰) + 1) = 0, because 1 is far below one ulp of 10²⁰ and disappears. The order of a summation changes its result, which is why a parallel GPU reduction can give a slightly different answer than a sequential loop.</li>
+<li><b>Absorption.</b> Adding a small number to a large one can have no effect at all: in FP32, 1 + 10⁻⁸ = 1.</li>
+<li><b>Catastrophic cancellation.</b> Subtracting two nearly equal numbers cancels their leading digits, leaving only the rounding errors: in FP32, (1 + 10⁻⁸) − 1 gives 0, a 100% relative error.</li>
+<li><b>Equality tests are fragile.</b> Compare with a tolerance scaled to the operands, for example |a − b| ≤ 10⁻⁶ × max(|a|, |b|), not with ==.</li>
+</ul>
+<warn>
+<p>Accumulating many small values into one large float. Summing a million values of 0.1 in FP32 gives about 100,958 instead of 100,000, because as the running sum grows its ulp grows, and each added 0.1 is rounded more coarsely. Fixes: accumulate in FP64, sum in a tree (pairwise), or use compensated (Kahan) summation, which tracks the rounding error in a second variable.</p>
+</warn>
+<p>Conversions round too. Converting a large int32 to float can lose low-order bits (int 16,777,217 becomes 16,777,216.0f), and converting a float to an int truncates toward zero; converting a float that is out of the integer's range is undefined behavior in C and C++.</p>
+
+<h3>Reduced-precision formats in machine-learning hardware</h3>
+<p>Neural networks tolerate low precision in most of their arithmetic, and halving the bits per number halves memory traffic and roughly quadruples the multipliers that fit in the same area. Accelerators therefore support narrower formats:</p>
+<ul>
+<li><b>FP16</b> (1/5/10): more precision than BF16 but a small range (maximum 65,504), so training with it needs loss scaling to keep small gradients from underflowing.</li>
+<li><b>BF16</b> (1/8/7): exactly the upper 16 bits of an FP32 number. It keeps FP32's full range with much less precision, which makes conversion trivial and avoids overflow problems.</li>
+<li><b>TF32</b> (1/8/10): an internal tensor-core format with FP32's range and FP16's precision.</li>
+<li><b>FP8</b>: E4M3 (4 exponent, 3 fraction bits, maximum 448) for weights and activations and E5M2 (maximum 57,344) for gradients; and integer formats such as INT8 with a scale factor.</li>
+</ul>
+<p>Matrix units typically multiply in the narrow format and accumulate the products in FP32, because the accumulation is where small errors would otherwise pile up.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Fixed point: an integer N with an implied scale 2<sup>−f</sup>; exact, cheap, limited range; a product has twice the fraction bits.</li>
+<li>IEEE 754: value = (−1)<sup>s</sup> × 1.f × 2<sup>e − bias</sup>; FP32 is 1/8/23 with bias 127; FP64 is 1/11/52 with bias 1023.</li>
+<li>Exponent all zeros: zero and subnormals; all ones: infinities and NaN.</li>
+<li>Spacing doubles every binade; machine epsilon is 2⁻²³ for FP32; integers are exact up to 2²⁴.</li>
+<li>Every operation rounds (to nearest, ties to even), so floating point is not associative and equality comparisons need tolerances.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Name the three fields of an FP32 number and give their widths. What is the bias?</p></ask>
+<sol><p>Sign (1 bit), exponent (8 bits), fraction (23 bits). The exponent bias is <b>127</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Why does IEEE 754 not store the leading 1 of the significand?</p></ask>
+<sol><p>For every normalized binary number the leading digit is 1, so storing it would waste a bit. Leaving it implicit (the <b>hidden bit</b>) gives 24 bits of significand precision from 23 stored fraction bits. Subnormal numbers, where the leading digit is 0, are flagged by an exponent field of all zeros.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>An unsigned Q4.4 number is stored as 0xA6. What value does it represent, and what is the format's resolution?</p></ask>
+<sol><p>0xA6 = 1010.0110₂ = 10 + ¼ + ⅛ = <b>10.375</b> (also 166 / 16). Resolution 2⁻⁴ = <b>0.0625</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Encode 0.15625 as an FP32 bit pattern in hex.</p></ask>
+<sol><p>0.15625 = 1/8 + 1/32 = 0.00101₂ = 1.01 × 2⁻³. e = −3 + 127 = 124 = 0111 1100. f = 01000…. s = 0. Bits: 0 01111100 0100…0 = 0011 1110 0010 0000 … = <b>0x3E200000</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Decode the FP32 pattern 0xC1200000.</p></ask>
+<sol><p>1100 0001 0010 0000 …: s = 1, e = 1000 0010 = 130, f = 0100…. Value = −1.01₂ × 2³ = −1010₂ = <b>−10.0</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Encode 9.5 in FP16 (1 sign, 5 exponent with bias 15, 10 fraction bits). Give the hex pattern.</p></ask>
+<sol><p>9.5 = 1001.1₂ = 1.0011 × 2³. e = 3 + 15 = 18 = 10010. f = 0011000000. Bits: 0 10010 0011000000 = 0100 1000 1100 0000 = <b>0x48C0</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Multiply 3.25 by 1.5 in unsigned Q4.4 fixed point. Show the stored integers and the shift.</p></ask>
+<sol><p>3.25 → 3.25 × 16 = 52 = 0x34; 1.5 → 24 = 0x18. Integer product 52 × 24 = 1248, a Q8.8 value (1248 / 256 = 4.875). Shift right by 4: 1248 / 16 = 78 = <b>0x4E</b>, which in Q4.4 is 78 / 16 = 4.875. Exact, since 3.25 × 1.5 = 4.875.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What FP32 exponent field values are reserved, and what do they mean?</p></ask>
+<sol><p><b>0</b>: zero (fraction 0) or subnormal numbers (fraction ≠ 0). <b>255</b>: infinity (fraction 0) or NaN (fraction ≠ 0). Normal numbers use 1 to 254, for true exponents −126 to +127.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What are the largest finite FP32 value and the smallest positive normal and subnormal values? Express each as a power-of-two formula and approximately in decimal.</p></ask>
+<sol><p>Largest: e = 254, f all ones: (2 − 2⁻²³) × 2¹²⁷ ≈ <b>3.40 × 10³⁸</b>. Smallest normal: e = 1, f = 0: 2⁻¹²⁶ ≈ <b>1.18 × 10⁻³⁸</b>. Smallest subnormal: e = 0, f = 0…01: 2⁻²³ × 2⁻¹²⁶ = 2⁻¹⁴⁹ ≈ <b>1.40 × 10⁻⁴⁵</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What is the ulp of an FP32 number between 1024 and 2048? What is stored if you add 0.00005 to 1500.0f? What if you add 0.0001?</p></ask>
+<sol><p>Numbers in [2¹⁰, 2¹¹) have true exponent 10, so ulp = 2<sup>10 − 23</sup> = 2⁻¹³ ≈ <b>1.22 × 10⁻⁴</b>, and half an ulp is about 6.1 × 10⁻⁵. Adding 0.00005 (less than half an ulp) rounds back to <b>1500.0 exactly</b>: the addition has no effect. Adding 0.0001 (more than half an ulp) rounds up to the next representable value, <b>1500.0001220703125</b>: the stored increment is 22% larger than the one requested. Near 1500, FP32 cannot represent changes smaller than 0.000122.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A float counter starts at 0 and is incremented by 1.0f in a loop. At what value does it stop increasing, and why?</p></ask>
+<sol><p>At <b>16,777,216 = 2²⁴</b>. In [2²⁴, 2²⁵) the ulp is 2, so 2²⁴ + 1 lies exactly halfway between 2²⁴ and 2²⁴ + 2 and rounds to the even neighbor, 2²⁴. Every further increment rounds back to the same value.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Add 6.75 and 0.15625 using the floating-point algorithm: align, add, normalize, round. Assume a 4-bit fraction field so that rounding matters.</p></ask>
+<sol><p>6.75 = 1.1011 × 2² and 0.15625 = 1.0100 × 2⁻³. Align the smaller to exponent 2 by shifting right 5 places: 0.0000101 × 2². Add: 1.1011000 + 0.0000101 = 1.1011101 × 2² (exact value 6.90625). Normalized already. Round to 4 fraction bits: 1.1011|101, the remainder 101 is more than half, so round up to <b>1.1100 × 2² = 7.0</b>. With 23 fraction bits, the sum 6.90625 would be exact.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Why is BF16 conversion from FP32 described as "free", and what is lost? Convert the FP32 value 0x3F9DF3B6 (≈ 1.234) to BF16 with round to nearest even.</p></ask>
+<sol><p>BF16 has the same sign and 8-bit exponent as FP32, so converting just keeps the upper 16 bits (and rounds on the lower 16); range is unchanged and only fraction bits are lost (23 → 7). Upper half 0x3F9D, lower half 0xF3B6, which is more than 0x8000 (half), so round up: <b>0x3F9E</b>. Its value is 1.0011110₂ = 1.234375, against 1.2340 for the FP32 value.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A program sums one million copies of 0.1f into a float accumulator and gets about 100,958. Explain the error mechanism quantitatively, and propose two fixes with their cost.</p></ask>
+<sol><p>As the sum grows, its ulp grows: between 65,536 and 131,072 the FP32 ulp is 2⁻⁷ = 0.0078125. Each addition of 0.1 must round the new sum to a multiple of that ulp: 0.1 / 0.0078125 = 12.8 ulps, which rounds to 13 ulps = 0.1015625. Every addition in that range adds about 1.6% too much, and the errors in earlier binades are similar in kind, giving a total near 100,958. <b>Fixes:</b> accumulate in double (ulp near 10⁵ is about 1.5 × 10⁻¹¹, so the error becomes negligible; costs a wider accumulator); use <b>Kahan summation</b>, which carries a correction term holding the rounding error of each addition (about four times the operations); or sum <b>pairwise</b> (tree reduction), whose error grows like log n instead of n and maps naturally onto parallel hardware.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Explain why the bit patterns of non-negative IEEE floats, compared as unsigned integers, sort in the same order as their values. What breaks for negative values, and how can a radix sort handle all floats?</p></ask>
+<sol><p>For non-negative numbers the word is 0, then the biased exponent, then the fraction. A larger value either has a larger exponent field (more significant bits, so a larger integer) or the same exponent and a larger fraction (the next bits). Biasing makes the exponent field an unsigned, monotonic code, which is exactly why IEEE chose a bias instead of two's complement. Negative numbers are sign-magnitude, so a larger magnitude gives a larger integer but a smaller value, and all negatives compare as larger than all positives because of the sign bit. The standard fix: for a non-negative float, flip the sign bit; for a negative float, flip all bits. The transformed patterns then sort correctly as unsigned integers.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An FP16 training run sees gradients of about 2 × 10⁻⁸ become exactly zero. Why, and how does loss scaling fix it? Why does BF16 avoid the problem?</p></ask>
+<sol><p>FP16's smallest normal is 2⁻¹⁴ ≈ 6.1 × 10⁻⁵ and its smallest subnormal is 2⁻²⁴ ≈ 6.0 × 10⁻⁸. A gradient of 2 × 10⁻⁸ is below half the smallest subnormal, so it rounds to <b>zero</b> (underflow). <b>Loss scaling</b> multiplies the loss by a large factor such as 2¹⁶ before backpropagation; every gradient is scaled by the same factor into FP16's representable range, and the weight update divides it back out in FP32. BF16 has FP32's 8-bit exponent, so its normal range extends down to about 1.2 × 10⁻³⁸ and such gradients are representable without scaling, at the cost of only 8 significant bits.</p></sol>
+</prob>
+</practice>
+</module>

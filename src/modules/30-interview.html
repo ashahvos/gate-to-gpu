@@ -1,0 +1,588 @@
+<module id="interview" num="Q" nav="Q" badge="Interview" pfx="Q" part="8" title="Interview problem set" short="Interview problems" blurb="Problems in the style of online assessments and technical interviews for hardware, silicon and embedded roles, grouped by topic. Each solution explains the reasoning an interviewer listens for, and links back to the module that teaches it.">
+
+<p>The problems below are typical of the questions asked in screening tests and technical interviews for digital design, verification, architecture, GPU and embedded positions. They mix quick checks of fundamentals, short design tasks and longer questions with a trap in them. Interviewers usually care less about the final number than about the reasoning: say what you are assuming, name the principle you are applying, and check your answer against a simple case. Each section links to the modules that teach its material.</p>
+<p>Use the level filter in the toolbar to start with the easier questions, and the <b>Random problem</b> button for mixed review. When you miss one, reread the linked module and work its medium and hard problems before coming back.</p>
+
+<practice title="Numbers and arithmetic">
+<prob level="easy" tags="numbers">
+<ask><p>Convert 615₈ to hexadecimal.</p></ask>
+<sol><p>Through binary: 6 1 5 → 110 001 101 → regroup in fours from the right: 1 1000 1101 → <b>0x18D</b> (= 397). (<ref to="numbers"/>)</p></sol>
+</prob>
+<prob level="easy" tags="numbers">
+<ask><p>What is the minimum number of bits needed to give 384 different items distinct codes?</p></ask>
+<sol><p>2⁸ = 256 &lt; 384 ≤ 512 = 2⁹: <b>9 bits</b>.</p></sol>
+</prob>
+<prob level="easy" tags="signed">
+<ask><p>What is the range of an 8-bit two's complement number? What is the result of negating −128 in 8 bits, and why?</p></ask>
+<sol><p>Range <b>−128 to +127</b>. Negating −128 (1000 0000) by inverting and adding 1 gives 0111 1111 + 1 = 1000 0000 = <b>−128</b> again: +128 is not representable, so the negation overflows. (<ref to="signed"/>)</p></sol>
+</prob>
+<prob level="medium" tags="signed">
+<ask><p>Interpret the byte 1001 0011 as an unsigned number, a sign-magnitude number and a two's complement number.</p></ask>
+<sol><p>Unsigned: 128 + 16 + 2 + 1 = <b>147</b>. Sign-magnitude: sign 1, magnitude 001 0011 = 19 → <b>−19</b>. Two's complement: 147 − 256 = <b>−109</b>.</p></sol>
+</prob>
+<prob level="medium" tags="signed, C">
+<ask><p>Write a C expression that detects signed overflow in s = a + b for 32-bit ints, computing the sum without undefined behavior.</p></ask>
+<sol><p>Compute in unsigned arithmetic, which wraps legally: <code>uint32_t s = (uint32_t)a + (uint32_t)b;</code>. Overflow occurred if a and b have the same sign and s has a different one: <b><code>((a ^ s) &amp; (b ^ s)) &gt;&gt; 31</code></b> (as unsigned), i.e. the sign bit of (a ⊕ s) AND (b ⊕ s). This is the software form of the hardware rule V = C<sub>n−1</sub> ⊕ C<sub>n</sub>. GCC and Clang also offer <code>__builtin_add_overflow</code>.</p></sol>
+</prob>
+<prob level="easy" tags="arithmetic">
+<ask><p>Multiply an integer x by 7 using only shifts and one addition or subtraction. By 10?</p></ask>
+<sol><p>7x = <b>(x &lt;&lt; 3) − x</b>. 10x = <b>(x &lt;&lt; 3) + (x &lt;&lt; 1)</b>. Compilers do this automatically when it is cheaper than a multiply.</p></sol>
+</prob>
+<prob level="medium" tags="float">
+<ask><p>Encode −0.75 in IEEE 754 single precision (hex).</p></ask>
+<sol><p>0.75 = 1.1₂ × 2⁻¹. Sign 1; exponent −1 + 127 = 126 = 0111 1110; fraction 1000…0. Bits: 1 01111110 1000 0000 0000 0000 0000 000 = <b>0xBF400000</b>. (<ref to="float"/>)</p></sol>
+</prob>
+<prob level="medium" tags="float">
+<ask><p>Why does <code>0.1 + 0.2 == 0.3</code> evaluate to false in C with doubles? How should floating-point values be compared?</p></ask>
+<sol><p>None of the three values is exactly representable in binary (each is a repeating binary fraction), so each is rounded, and the rounded sum of the first two differs from the rounded 0.3 in the last bit (the sum is stored as 0.3000000000000000444…, while 0.3 is stored as 0.2999999999999999888…). Compare with a tolerance appropriate to the magnitudes involved, for example <code>fabs(x − y) &lt;= 1e-12 * fmax(fabs(x), fabs(y))</code>, or restructure the computation to avoid needing equality.</p></sol>
+</prob>
+<prob level="hard" tags="float">
+<ask><p>What is the smallest positive integer that cannot be represented exactly in FP32? Why?</p></ask>
+<sol><p>FP32 has 24 bits of significand (23 stored plus the hidden 1), so every integer up to 2²⁴ = 16,777,216 is exact. Above that, consecutive representable values are 2 apart, so <b>16,777,217</b> is the first that cannot be represented (it rounds to 16,777,216). A float counter incremented by 1 stops growing there.</p></sol>
+</prob>
+<prob level="medium" tags="signed, C">
+<ask><p>A 12-bit two's complement value arrives in the low bits of an unsigned 32-bit variable x (upper bits zero). Sign-extend it to a 32-bit signed value without branches.</p></ask>
+<sol><p><b><code>int32_t v = (int32_t)(x ^ 0x800u) - 0x800;</code></b>. If bit 11 is 0, the XOR adds 2048 and the subtraction removes it again. If bit 11 is 1, the XOR removes 2048 and subtracting another 2048 yields x − 4096, the correct negative value. The XOR result is between 0 and 4095, so the conversion to int32_t and the signed subtraction are always well defined. The common alternative <code>((int32_t)(x &lt;&lt; 20)) &gt;&gt; 20</code> relies on implementation-defined behavior: converting an out-of-range unsigned value to a signed type, and right-shifting a negative number.</p></sol>
+</prob>
+<prob level="hard" tags="arithmetic, C">
+<ask><p>Write a branchless saturating addition of two uint8_t values (results above 255 clamp to 255).</p></ask>
+<sol><pre lang="c">uint8_t sat_add_u8(uint8_t a, uint8_t b)
+{
+    uint16_t r = (uint16_t)a + b;      // 0..510, the carry lands in bit 8
+    r |= -(r >> 8);                    // if bit 8 is set, OR in all ones
+    return (uint8_t)r;
+}</pre><p>If the sum is below 256, r &gt;&gt; 8 is 0 and nothing changes. Otherwise it is 1, its negation is all ones, and the low byte becomes 0xFF. Hardware does the same with the carry-out driving a mux. DSP and GPU instruction sets have saturating arithmetic built in.</p></sol>
+</prob>
+<prob level="easy" tags="codes">
+<ask><p>What is the Gray code of 13, and how is it computed in general?</p></ask>
+<sol><p>G = B ⊕ (B &gt;&gt; 1): 1101 ⊕ 0110 = <b>1011</b>. Consecutive Gray codes differ in exactly one bit, which is why Gray-coded counters are safe to pass between clock domains. (<ref to="numbers"/>)</p></sol>
+</prob>
+</practice>
+
+<practice title="Combinational logic">
+<prob level="easy" tags="muxes">
+<ask><p>Using only 2-to-1 multiplexers (and the constants 0 and 1), build NOT, AND and OR.</p></ask>
+<sol><p>A mux computes S′·I0 + S·I1. <b>NOT A</b>: S = A, I0 = 1, I1 = 0. <b>A AND B</b>: S = A, I0 = 0, I1 = B. <b>A OR B</b>: S = A, I0 = B, I1 = 1. Since NOT and AND form a complete set, a 2-to-1 mux is universal. (<ref to="blocks"/>)</p></sol>
+</prob>
+<prob level="easy" tags="gates">
+<ask><p>What is the minimum number of 2-input NAND gates needed to build XOR? Sketch the structure.</p></ask>
+<sol><p><b>Four.</b> N1 = (AB)′; N2 = (A·N1)′; N3 = (B·N1)′; Y = (N2·N3)′ = A ⊕ B. The shared first gate is the trick. (<ref to="boolean"/>)</p></sol>
+</prob>
+<prob level="medium" tags="muxes">
+<ask><p>Build a 4-to-1 mux from 2-to-1 muxes. Then build an 8-to-1 mux from 4-to-1 and 2-to-1 muxes.</p></ask>
+<sol><p>4-to-1: two 2-to-1 muxes on S0 select between (I0, I1) and (I2, I3); a third, on S1, selects between their outputs: <b>3 muxes</b>. 8-to-1: two 4-to-1 muxes on S1S0 handle I0–I3 and I4–I7; a 2-to-1 mux on S2 picks one: <b>2 + 1</b>.</p></sol>
+</prob>
+<prob level="medium" tags="muxes">
+<ask><p>Implement an arbitrary 3-input function F(A, B, C) with a single 4-to-1 mux and at most one inverter.</p></ask>
+<sol><p>Use A and B as the selects. For each of the four (A, B) combinations, F restricted to that combination is a function of C alone, which can only be <b>0, 1, C or C′</b>; connect that to the corresponding data input (one inverter supplies C′). This is Shannon expansion: F = A′B′·F(0,0,C) + A′B·F(0,1,C) + AB′·F(1,0,C) + AB·F(1,1,C). An FPGA LUT is the same idea taken to all inputs.</p></sol>
+</prob>
+<prob level="medium" tags="K-maps">
+<ask><p>Minimize F(A, B, C, D) = Σm(0, 2, 5, 7, 8, 10, 13, 15).</p></ask>
+<sol><p>The 1s are all cells with B = D = 0 (the four corners) and all cells with B = D = 1 (the center square): <b>F = B′D′ + BD = (B ⊕ D)′</b>, an XNOR of B and D; A and C are irrelevant. (<ref to="kmaps"/>)</p></sol>
+</prob>
+<prob level="medium" tags="comparators">
+<ask><p>Derive a minimal SOP for A &gt; B, where A = A1A0 and B = B1B0 are 2-bit unsigned numbers.</p></ask>
+<sol><p><b>A &gt; B = A1·B1′ + A1·A0·B0′ + A0·B1′·B0′</b>. The first term is "the high bits decide" (A1 = 1, B1 = 0). The other two cover "the high bits are equal and A0 &gt; B0": A1·A0·B0′ handles A1 = B1 = 1, and A0·B1′·B0′ handles A1 = B1 = 0. Each has dropped one literal by merging with cells the first term already covers, which is why the K-map gives three-literal terms rather than four-literal ones.</p></sol>
+</prob>
+<prob level="medium" tags="encoders">
+<ask><p>Write the equations of a 4-input priority encoder (I3 has the highest priority) with outputs Y1 Y0 and a valid flag V.</p></ask>
+<sol><p><b>Y1 = I3 + I2</b>, <b>Y0 = I3 + I2′·I1</b>, <b>V = I3 + I2 + I1 + I0</b>. Y0 is 1 for index 3 or for index 1, and index 1 wins only if I2 is not active (I3 is already covered by the first term).</p></sol>
+</prob>
+<prob level="medium" tags="hazards">
+<ask><p>F = A·B′ + B·C has a static-1 hazard. When does it glitch, and how is it removed?</p></ask>
+<sol><p>With A = C = 1, F should stay 1 when B changes, but as B falls, the B·C term can turn off before the A·B′ term turns on (B′ is delayed by the inverter), giving a brief 0. Adding the consensus term <b>A·C</b> covers the transition and removes the hazard; it is logically redundant. (<ref to="kmaps"/>)</p></sol>
+</prob>
+<prob level="hard" tags="Boolean algebra">
+<ask><p>Is {XOR, AND} functionally complete? What if the constant 1 is also available?</p></ask>
+<sol><p>Without constants, <b>no</b>: both gates output 0 when all inputs are 0, so every circuit built from them maps all-zeros to 0 and can never produce NOT. With the constant 1, <b>yes</b>: NOT x = x ⊕ 1, and {AND, NOT} is complete. (This basis is the algebraic normal form used in cryptography.)</p></sol>
+</prob>
+<prob level="easy" tags="Boolean algebra">
+<ask><p>How many distinct Boolean functions of n inputs exist? Give the number for n = 2 and n = 4.</p></ask>
+<sol><p>A truth table has 2ⁿ rows, each 0 or 1: <b>2^(2ⁿ)</b> functions. n = 2: <b>16</b>. n = 4: <b>65,536</b>.</p></sol>
+</prob>
+<prob level="hard" tags="design">
+<ask><p>Design a circuit whose output is 1 when the 4-bit unsigned input ABCD is a multiple of 3. A K-map gives no simplification at all; find a better structure.</p></ask>
+<hint><p>Work modulo 3: what is 2 equal to, mod 3?</p></hint>
+<sol><p>The multiples (0, 3, 6, 9, 12, 15) are pairwise non-adjacent, so the minimal SOP is six 4-literal minterms. But 2 ≡ −1 (mod 3), so 8A + 4B + 2C + D ≡ −A + B − C + D. With each bit 0 or 1 this sum lies between −2 and 2, so it is a multiple of 3 exactly when it is 0: <b>the number of 1s among B and D equals the number among A and C</b>. That compares two 2-bit counts, a few gates; for wider numbers the same alternating-sum idea extends (and an FSM handles serial input; see the sequential section).</p></sol>
+</prob>
+<prob level="easy" tags="muxes">
+<ask><p>How many select lines does a 32-to-1 multiplexer need? How many 2-to-1 muxes would build it as a tree?</p></ask>
+<sol><p><b>5</b> select lines. A tree of 2-to-1 muxes needs 16 + 8 + 4 + 2 + 1 = <b>31</b>.</p></sol>
+</prob>
+<prob level="medium" tags="decoders">
+<ask><p>Build a 3-to-8 decoder from two 2-to-4 decoders with active-high enables and one inverter.</p></ask>
+<sol><p>Connect A1 A0 to both decoders' inputs. Enable the first (outputs 0–3) with A2′ (through the inverter) and the second (outputs 4–7) with A2. If the 3-to-8 decoder needs its own enable E, use E·A2′ and E·A2 instead. (<ref to="blocks"/>)</p></sol>
+</prob>
+<prob level="medium" tags="adders">
+<ask><p>Estimate, in gate delays, the worst-case delay of a 32-bit ripple-carry adder and of a carry-lookahead adder built as a tree of 4-bit lookahead units.</p></ask>
+<sol><p>Ripple: the carry passes through an AND-OR (2 gate delays) per bit, roughly <b>64 gate delays</b>. Lookahead: a tree of 4-bit units needs ⌈log₄ 32⌉ = 3 levels, and each AND-OR step costs 2 gate delays. The bit generate and propagate signals take 1; group signals rise through the first two levels (4); the top level computes its carries (2); the carries descend two levels (4); the sum XOR adds 1. Total 1 + 4 + 2 + 4 + 1 = <b>12</b>. The delay grows with the logarithm of the width instead of linearly, at the cost of area and fan-in. (<ref to="arith"/>)</p></sol>
+</prob>
+</practice>
+
+<practice title="Sequential logic and state machines">
+<prob level="easy" tags="latches">
+<ask><p>What is the difference between a latch and a flip-flop? Where is each used?</p></ask>
+<sol><p>A latch is <b>level-sensitive</b>: transparent (output follows input) while its enable is active, holding otherwise. A flip-flop is <b>edge-triggered</b>: it samples its input only at a clock edge. Flip-flops are the default in synchronous design because data cannot race through them; latches appear inside flip-flops, in clock-gating cells, and in some high-performance designs that use time borrowing. (<ref to="latches"/>)</p></sol>
+</prob>
+<prob level="easy" tags="flip-flops">
+<ask><p>Convert a D flip-flop into a T flip-flop and into a JK flip-flop.</p></ask>
+<sol><p>T: <b>D = T ⊕ Q</b>. JK: <b>D = J·Q′ + K′·Q</b>.</p></sol>
+</prob>
+<prob level="medium" tags="FSM">
+<ask><p>Bits of a binary number arrive serially, most significant bit first. Design an FSM whose output says whether the number received so far is divisible by 3.</p></ask>
+<sol><p>The state is the remainder r ∈ {0, 1, 2}. Appending bit b turns the value v into 2v + b, so <b>r* = (2r + b) mod 3</b>. Transitions: r0: b = 0 → r0, b = 1 → r1; r1: 0 → r2, 1 → r0; r2: 0 → r1, 1 → r2. Output 1 in r0 (Moore). Three states, two flip-flops. (<ref to="fsm"/>)</p></sol>
+</prob>
+<prob level="medium" tags="FSM">
+<ask><p>How many states does a Mealy machine need to detect the pattern 1101 with overlapping matches? List the transitions.</p></ask>
+<sol><p><b>Four</b> (S0 nothing, S1 "1", S2 "11", S3 "110"). S0: 1 → S1, 0 → S0. S1: 1 → S2, 0 → S0. S2: 1 → S2, 0 → S3. S3: 1 → S1 with output 1 (pattern complete; the trailing 1 is a new prefix), 0 → S0. All other transitions output 0. The Moore version needs a fifth state for "found".</p></sol>
+</prob>
+<prob level="easy" tags="counters">
+<ask><p>How many flip-flops does a counter need to divide a clock by 1000? How many states does a 5-flip-flop Johnson counter have?</p></ask>
+<sol><p>A modulo-1000 counter needs ⌈log₂ 1000⌉ = <b>10</b> flip-flops. A Johnson counter with n flip-flops has 2n = <b>10</b> states. (<ref to="registers"/>)</p></sol>
+</prob>
+<prob level="medium" tags="clocks">
+<ask><p>Design a divide-by-4 clock with a 50% duty cycle, and a divide-by-3 clock with a 50% duty cycle.</p></ask>
+<sol><p>Divide by 4: a 2-bit counter's MSB, or two toggle flip-flops in series (each halves the frequency). Divide by 3 at 50%: a mod-3 counter on rising edges produces a signal high for 1 of 3 cycles; a falling-edge flip-flop delays it by half a cycle; ORing the two gives a signal high for 1.5 of 3 cycles. Odd divisors with 50% duty always need both clock edges.</p></sol>
+</prob>
+<prob level="medium" tags="edge detect">
+<ask><p>Design a circuit that produces a one-clock-cycle pulse on each rising edge of a synchronous signal x. What changes if x is asynchronous?</p></ask>
+<sol><p>Delay x by one flip-flop (x_d) and output <b>x·x_d′</b>. If x is asynchronous, first pass it through a two-flip-flop synchronizer and apply the detector to the synchronized signal, otherwise the AND can see a metastable or inconsistent value.</p></sol>
+</prob>
+<prob level="medium" tags="LFSR">
+<ask><p>What is the longest sequence a 3-bit LFSR can produce, and why can it never produce all 8 states?</p></ask>
+<sol><p><b>7 states</b> (2³ − 1). The all-zeros state feeds back XOR(0, 0) = 0 and maps to itself, so a maximal LFSR cycles through all nonzero states and must never enter zero.</p></sol>
+</prob>
+<prob level="easy" tags="FSM">
+<ask><p>Design a serial odd-parity checker: its output is 1 when an odd number of 1s has been received so far.</p></ask>
+<sol><p>One flip-flop holding the parity: <b>P* = P ⊕ x</b>, output P, reset to 0. It is a T flip-flop with T = x.</p></sol>
+</prob>
+<prob level="hard" tags="clocks">
+<ask><p>Why is <code>assign clk_out = sel ? clk_b : clk_a;</code> a dangerous way to switch between two clocks, and how does a glitch-free clock multiplexer work?</p></ask>
+<sol><p>If sel changes while either clock is high, the output can produce a runt pulse (part of a high phase from one clock followed immediately by the other), which may clock some flip-flops and not others. A glitch-free mux gives each clock an enable flip-flop clocked on that clock's falling edge; each enable can turn on only after the other has turned off (they are cross-coupled through synchronizers), and each clock is ANDed with its enable before the two are ORed. Switching therefore happens only while both clocks are low, and there is a short gap with no clock rather than a glitch.</p></sol>
+</prob>
+<prob level="medium" tags="resets">
+<ask><p>Compare synchronous and asynchronous resets: one advantage and one risk of each.</p></ask>
+<sol><p><b>Synchronous:</b> reset is ordinary data, so it is timed by STA and filtered of glitches; but it needs a running clock to take effect and adds logic to the D path. <b>Asynchronous:</b> works without a clock and costs no data-path logic; but its release is asynchronous and can cause metastability or flip-flops leaving reset in different cycles, so it must be deasserted through a reset synchronizer. (<ref to="timing"/>)</p></sol>
+</prob>
+<prob level="hard" tags="FIFO">
+<ask><p>A producer writes bursts of 120 words, one per cycle at 200 MHz, and then stays idle long enough for the FIFO to drain. The consumer reads one word per cycle at 150 MHz continuously. What is the minimum FIFO depth?</p></ask>
+<sol><p>A burst lasts 120/200 MHz = 600 ns. In that time the consumer removes 600 ns × 150 MHz = 90 words. The FIFO must absorb the difference: <b>120 − 90 = 30 words</b>. Real designs add margin for the latency of synchronizing pointers across clock domains (a few entries) and for any consumer stalls.</p></sol>
+</prob>
+<prob level="hard" tags="FSM">
+<ask><p>A vending machine accepts nickels (N) and dimes (D) and dispenses an item at 15 cents without giving change; extra money carries over. How many states, and what are the transitions?</p></ask>
+<sol><p>States by credit: 0, 5, 10 cents (<b>three</b>, since 15 or more immediately dispenses). From 0: N → 5, D → 10. From 5: N → 10, D → 0 with dispense (15). From 10: N → 0 with dispense, D → 5 with dispense (20 − 15 = 5 carried). Dispense is a Mealy output on those transitions; a Moore version adds states for "dispensing".</p></sol>
+</prob>
+</practice>
+
+<practice title="Timing, clocking and clock domains">
+<prob level="easy" tags="timing">
+<ask><p>t<sub>clk→Q</sub> = 70 ps, logic delay 520 ps, t<sub>setup</sub> = 40 ps. What is the maximum clock frequency?</p></ask>
+<sol><p>T<sub>min</sub> = 70 + 520 + 40 = 630 ps → f<sub>max</sub> ≈ <b>1.59 GHz</b>. (<ref to="timing"/>)</p></sol>
+</prob>
+<prob level="medium" tags="timing">
+<ask><p>A path has t<sub>clk→Q,min</sub> = 30 ps, a minimum logic delay of 10 ps, and the capture flip-flop's hold time is 55 ps. Is there a problem? Does slowing the clock fix it?</p></ask>
+<sol><p>30 + 10 = 40 &lt; 55: a <b>15 ps hold violation</b>. Slowing the clock does <b>not</b> help, since the period does not appear in the hold check. Insert delay (buffers) on that path or reduce clock skew.</p></sol>
+</prob>
+<prob level="medium" tags="timing">
+<ask><p>The capture clock arrives 50 ps after the launch clock. How does this skew affect the setup and hold checks?</p></ask>
+<sol><p>Setup: the data has 50 ps more time (T + 50 ≥ t<sub>cq</sub> + t<sub>pd</sub> + t<sub>su</sub>), which <b>helps</b>. Hold: the capture flop holds its sampling window open 50 ps later, so the new data must arrive at least 50 ps later than before (t<sub>cq</sub> + t<sub>cd</sub> ≥ t<sub>h</sub> + 50), which <b>hurts</b>. Skew moves margin from one check to the other.</p></sol>
+</prob>
+<prob level="medium" tags="oscillators">
+<ask><p>A ring oscillator has 5 inverters, each with a 20 ps delay. What is its frequency? Why must the number of inverters be odd?</p></ask>
+<sol><p>A transition must travel around the ring twice per period (once to flip every node, once to flip it back): f = 1/(2·N·t<sub>pd</sub>) = 1/(2 × 5 × 20 ps) = <b>5 GHz</b>. With an even number of inversions the ring has a stable state (it is a latch, like cross-coupled inverters) and does not oscillate.</p></sol>
+</prob>
+<prob level="medium" tags="metastability">
+<ask><p>What is metastability, and how much does adding a third flip-flop to a two-flip-flop synchronizer improve its MTBF?</p></ask>
+<sol><p>When a flip-flop samples an input that changes within its setup/hold window, its internal loop can balance near the midpoint and take an unbounded time to resolve. The probability of still being unresolved after time t decays as e<sup>−t/τ</sup>. A third stage adds roughly one more clock period of resolution time, multiplying the MTBF by about <b>e<sup>T/τ</sup></b>, an enormous factor (for T = 1 ns and τ = 20 ps, e⁵⁰). The cost is one more cycle of latency.</p></sol>
+</prob>
+<prob level="medium" tags="CDC">
+<ask><p>Why can't an 8-bit counter value be passed to another clock domain by putting a two-flip-flop synchronizer on each bit? Give two correct methods.</p></ask>
+<sol><p>Bits that change at the same time may be sampled in different cycles, producing values the counter never held (for example 0111 1111 → 1000 0000 could be read as 1111 1111). Correct methods: convert to <b>Gray code</b> (one bit changes per increment) before synchronizing; or hold the value stable and pass a single <b>handshake</b> signal (request/acknowledge) through synchronizers; or use an <b>asynchronous FIFO</b> for streams of data.</p></sol>
+</prob>
+<prob level="hard" tags="timing">
+<ask><p>A block of logic takes 1.8 ns, but the design runs at 1 GHz, and its result is only needed every other cycle. How can the design be made to work without pipelining the logic?</p></ask>
+<sol><p>Treat it as a <b>multicycle path</b>: make the source registers hold their values for two cycles and the destination register load only every second cycle (with an enable driven by a toggle flip-flop), then tell the timing tool that the path has two cycles for setup (and adjust the hold check accordingly). The logic then has 2 ns, enough for 1.8 ns plus register overheads.</p></sol>
+</prob>
+<prob level="medium" tags="clock gating">
+<ask><p>Why do designs use integrated clock-gating cells instead of an AND gate between the clock and an enable?</p></ask>
+<sol><p>If the enable changes while the clock is high, an AND gate produces a truncated pulse (a glitch) that may clock some registers and not others. An ICG cell latches the enable while the clock is low, so the AND's enable input is stable whenever the clock is high and only whole pulses pass. Clock gating is still worth doing because it removes the dynamic power of idle registers and their clock wiring. (<ref to="registers"/>)</p></sol>
+</prob>
+<prob level="hard" tags="timing">
+<ask><p>A design fails at high temperature but passes at room temperature, and lowering the clock frequency fixes it. A second design fails at all frequencies but only on some chips. What kind of timing problem does each likely have?</p></ask>
+<sol><p>The first is a <b>setup</b> problem: delays grow at high temperature (and low voltage), the critical path no longer fits in the period, and a slower clock gives it the time it needs. The second points to a <b>hold</b> problem (or a clock-domain-crossing bug): hold violations do not depend on frequency, and process variation makes some chips' short paths fast enough, relative to their clock skew, to fail.</p></sol>
+</prob>
+<prob level="medium" tags="timing">
+<ask><p>What is clock jitter, and how does it enter the setup equation?</p></ask>
+<sol><p>Jitter is the variation of each clock edge from its ideal time, from noise in the PLL and clock network. In the worst case two edges arrive closer together than the nominal period, so the setup check uses the shortened period: <b>T − t<sub>jitter</sub> ≥ t<sub>cq</sub> + t<sub>pd</sub> + t<sub>su</sub></b>.</p></sol>
+</prob>
+</practice>
+
+<practice title="Verilog and RTL design">
+<prob level="easy" tags="Verilog">
+<ask><p>After a rising edge, with a = 1, b = 0, c = 0 beforehand, what are b and c in each block?</p>
+<pre lang="v">always @(posedge clk) begin b <= a; c <= b; end   // block 1
+always @(posedge clk) begin b = a;  c = b;  end   // block 2</pre></ask>
+<sol><p>Block 1 (nonblocking): b = <b>1</b>, c = <b>0</b> (c receives the old b): a shift register. Block 2 (blocking): b = <b>1</b>, c = <b>1</b>: c receives the new b. (<ref to="verilog"/>)</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>Write a parameterized modulo-N counter that outputs a one-cycle tick when it wraps.</p></ask>
+<sol><pre lang="v">module modn #(parameter N = 10, parameter W = $clog2(N)) (
+    input  wire         clk, rst,
+    output reg  [W-1:0] count,
+    output wire         tick
+);
+    assign tick = (count == N - 1);
+    always @(posedge clk)
+        if (rst || tick) count <= 0;
+        else             count <= count + 1'b1;
+endmodule</pre><p>Using the tick as an enable for slower logic keeps everything on one clock.</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>What is wrong with <code>always @(a or b) y = a &amp; b &amp; c;</code>?</p></ask>
+<sol><p>The sensitivity list omits c, so in <b>simulation</b> y does not update when only c changes, while <b>synthesis</b> ignores the list and builds a 3-input AND: the simulated and synthesized designs disagree. Use <code>always @*</code> (or <code>always_comb</code>), or an <code>assign</code>.</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>Write a 4-bit register that can load a parallel value, shift left with a serial input, or hold, selected by a 2-bit mode.</p></ask>
+<sol><pre lang="v">module shreg4 (
+    input  wire       clk, rst, sin,
+    input  wire [1:0] mode,          // 00 hold, 01 load, 10 shift left
+    input  wire [3:0] d,
+    output reg  [3:0] q
+);
+    always @(posedge clk)
+        if (rst) q <= 4'b0000;
+        else case (mode)
+            2'b01:   q <= d;
+            2'b10:   q <= {q[2:0], sin};
+            default: q <= q;
+        endcase
+endmodule</pre></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>Explain the difference between <code>==</code> and <code>===</code> in Verilog, and why it matters in testbenches.</p></ask>
+<sol><p><code>==</code> is logical equality: if either operand has x or z bits, the result is x (unknown), which an <code>if</code> treats as false. <code>===</code> is case equality: it compares x and z literally and always returns 0 or 1. A testbench that checks <code>if (out == expected)</code> silently passes or fails wrongly when out is x (for example an uninitialized register); <code>!==</code>/<code>===</code> catch it. Case equality is simulation-only and not synthesizable.</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>What hardware does this produce?</p>
+<pre lang="v">always @* begin
+    count = 0;
+    for (i = 0; i < 8; i = i + 1)
+        count = count + d[i];
+end</pre></ask>
+<sol><p>The loop is unrolled at synthesis time into a chain (which the tool usually rebalances into a tree) of adders that sums the 8 bits of d: a <b>population counter</b> with a 4-bit result. Loops in synthesizable code describe replicated hardware, not repeated execution over time.</p></sol>
+</prob>
+<prob level="hard" tags="arbiters">
+<ask><p>Describe how to implement a 4-requester round-robin arbiter in hardware.</p></ask>
+<sol><p>Keep a register with the index of the last granted requester. Mask the request vector so that only requesters <i>after</i> that index remain, and feed it to a priority encoder; if the masked vector is empty, use a second priority encoder on the unmasked requests (wrapping around). Grant the chosen requester (one-hot) and update the pointer. This gives every requester a turn within four grants, unlike a fixed-priority arbiter, which can starve low-priority requesters.</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>Why do many designers write state machines with a separate clocked block for the state register and a combinational block for the next state, instead of one clocked block?</p></ask>
+<sol><p>The two-block style mirrors the hardware (register + next-state logic), makes Mealy outputs and next-state values available combinationally, keeps blocking and nonblocking assignments in their proper places, and makes it easy to see that every state assigns every next-state value (with a default). A single clocked block is fine for Moore machines with registered outputs, but it registers everything assigned inside it, which can add an unintended cycle of latency to outputs.</p></sol>
+</prob>
+<prob level="hard" tags="CDC">
+<ask><p>Find the clock-domain-crossing bug:</p>
+<pre lang="v">// in clock domain B
+always @(posedge clk_b) begin
+    s1 <= a_valid & a_ready;   // a_valid, a_ready come from domain A
+    s2 <= s1;
+end</pre></ask>
+<sol><p>The synchronizer input is <b>combinational logic of two signals from the other domain</b>. The AND can glitch when its inputs change at different times, and the two inputs may be sampled inconsistently, so domain B can see a pulse that never existed in domain A. Compute the AND in domain A, register it there, and synchronize that single registered signal.</p></sol>
+</prob>
+<prob level="medium" tags="Verilog">
+<ask><p>Write a module that outputs a pulse one clock cycle wide every N cycles, without using a second clock.</p></ask>
+<sol><p>Use a modulo-N counter and output its terminal count, as in the mod-N counter above: <code>assign pulse = (count == N - 1);</code>. Downstream logic uses <code>pulse</code> as a clock <b>enable</b>; generating a divided clock would create a new clock domain with skew and timing complications.</p></sol>
+</prob>
+</practice>
+
+<practice title="Computer architecture">
+<prob level="easy" tags="performance">
+<ask><p>A program runs 5 × 10⁹ instructions with a CPI of 0.8 on a 4 GHz processor. How long does it take?</p></ask>
+<sol><p>5 × 10⁹ × 0.8/(4 × 10⁹) = <b>1.0 s</b>. (<ref to="perf"/>)</p></sol>
+</prob>
+<prob level="easy" tags="caches">
+<ask><p>A 64 KB, 4-way set-associative cache with 64-byte lines serves 48-bit addresses. How many offset, index and tag bits?</p></ask>
+<sol><p>Offset log₂ 64 = <b>6</b>. Sets = 64 KB/(64 × 4) = 256 → index <b>8</b>. Tag = 48 − 14 = <b>34</b>. (<ref to="caches"/>)</p></sol>
+</prob>
+<prob level="medium" tags="caches">
+<ask><p>L1 hit time 1 ns, miss rate 5%; L2 hit time 8 ns, local miss rate 30%; DRAM 100 ns. Compute the AMAT.</p></ask>
+<sol><p>1 + 0.05 × (8 + 0.3 × 100) = 1 + 0.05 × 38 = <b>2.9 ns</b>.</p></sol>
+</prob>
+<prob level="medium" tags="caches, C">
+<ask><p>Why can summing a large 2-D C array column by column be many times slower than row by row?</p></ask>
+<sol><p>C arrays are row-major. Row-by-row access is stride 1: every byte of each 64-byte line fetched is used. Column-by-column access jumps a whole row per element, so each access touches a different line, and for large arrays those lines are evicted before the next column could reuse them: up to one miss per element instead of one per 16 ints. Swap the loops (loop interchange) or tile.</p></sol>
+</prob>
+<prob level="medium" tags="caches">
+<ask><p>Compare write-through and write-back caches. Which is used for L1 data caches in most CPUs, and why?</p></ask>
+<sol><p>Write-through sends every store to the next level (simple, the next level is always current, but heavy traffic); write-back updates only the cache and writes a dirty line back on eviction (much less traffic, needs dirty bits and more complex coherence). Most CPU L1 data caches are <b>write-back</b> (with write-allocate), because repeated stores to the same lines are common and bandwidth to L2 is limited.</p></sol>
+</prob>
+<prob level="medium" tags="pipelining">
+<ask><p>In a 5-stage pipeline with forwarding, which data hazard still causes a stall, and why? How does the compiler help?</p></ask>
+<sol><p>The <b>load-use hazard</b>: a loaded value exists only at the end of MEM, too late to forward to an instruction that wants it in EX in the next cycle, so one bubble is inserted. Compilers schedule an independent instruction into the slot after the load. (<ref to="perf"/>)</p></sol>
+</prob>
+<prob level="medium" tags="pipelining">
+<ask><p>Base CPI 1. 20% of instructions are loads, half followed immediately by a dependent instruction (1 stall). 15% are branches, mispredicted 8% of the time with a 12-cycle penalty. What is the CPI?</p></ask>
+<sol><p>1 + 0.2 × 0.5 × 1 + 0.15 × 0.08 × 12 = 1 + 0.1 + 0.144 = <b>1.244</b>. Even an accurate predictor matters when the penalty is long.</p></sol>
+</prob>
+<prob level="medium" tags="branch prediction">
+<ask><p>Why does a 2-bit saturating counter predict loop branches better than a 1-bit predictor?</p></ask>
+<sol><p>A 1-bit predictor flips its prediction after the loop's single exit, so it mispredicts both the exit and the first iteration of the next execution of the loop. A 2-bit counter needs two consecutive mispredictions to change its prediction, so the exit only weakens it and the next run starts with a correct prediction: one miss per loop execution instead of two.</p></sol>
+</prob>
+<prob level="medium" tags="performance">
+<ask><p>A workload is 70% parallelizable. What speedup do 4 and 16 cores give, and what is the limit?</p></ask>
+<sol><p>4 cores: 1/(0.3 + 0.7/4) = <b>2.11</b>. 16 cores: 1/(0.3 + 0.7/16) = <b>2.91</b>. Limit: 1/0.3 = <b>3.33</b>. The serial 30% dominates quickly.</p></sol>
+</prob>
+<prob level="hard" tags="virtual memory">
+<ask><p>x86-64 uses 48-bit virtual addresses, 4 KB pages and 8-byte page-table entries, with each page-table level occupying exactly one page. How many levels are needed, and how many bits does each level translate?</p></ask>
+<sol><p>The page offset is 12 bits, leaving 36 bits of virtual page number. A 4 KB table holds 4096/8 = 512 entries = 9 bits per level. 36/9 = <b>4 levels of 9 bits</b>. (Five-level paging extends this to 57-bit addresses.)</p></sol>
+</prob>
+<prob level="medium" tags="virtual memory">
+<ask><p>What is a TLB, and what happens on a TLB miss?</p></ask>
+<sol><p>The translation lookaside buffer is a small, highly associative cache of recent virtual-to-physical page translations, so that most memory accesses need no page-table walk. On a miss, hardware (or, on some architectures, software) walks the multi-level page table in memory to find the entry, fills the TLB and retries; if the page is not present in memory, a page fault transfers control to the operating system.</p></sol>
+</prob>
+<prob level="hard" tags="out-of-order">
+<ask><p>Why does an out-of-order processor need a reorder buffer, if instructions are allowed to execute out of order anyway?</p></ask>
+<sol><p>Execution may be out of order, but the architectural state must change in program order, so that an exception or a mispredicted branch leaves the machine exactly as if every earlier instruction completed and no later one did (precise exceptions and recoverable speculation). The reorder buffer holds completed results until all older instructions have completed, then commits them in order, and discards everything younger than a mispredicted branch or a faulting instruction.</p></sol>
+</prob>
+<prob level="medium" tags="memory">
+<ask><p>How can a C program determine whether the machine is little-endian?</p></ask>
+<sol><p>Store a known multi-byte value and inspect its first byte: <code>uint32_t x = 1; bool little = *(uint8_t *)&amp;x == 1;</code>. On a little-endian machine the least significant byte is at the lowest address. (Reading through a <code>uint8_t</code> or <code>unsigned char</code> pointer is allowed by the aliasing rules.) (<ref to="memory"/>)</p></sol>
+</prob>
+<prob level="hard" tags="coherence">
+<ask><p>Two threads on different cores each increment their own counter in a loop, but the program runs far slower with two threads than with one. The counters are adjacent elements of an array. What is happening and how is it fixed?</p></ask>
+<sol><p><b>False sharing</b>: both counters share one 64-byte cache line, so each increment needs exclusive ownership of the line, which the coherence protocol takes away from the other core: the line ping-pongs between the cores' caches. Fix by placing each counter in its own line (padding or <code>alignas(64)</code>), or by accumulating in local variables and combining once at the end. (<ref to="parallel"/>)</p></sol>
+</prob>
+</practice>
+
+<practice title="GPUs and parallel computing">
+<prob level="easy" tags="CUDA">
+<ask><p>A kernel is launched with 128 threads per block. Which global index does thread 5 of block 10 handle? How many blocks cover 10,000 elements?</p></ask>
+<sol><p>10 × 128 + 5 = <b>1285</b>. ⌈10,000/128⌉ = <b>79 blocks</b> (with a bounds check for the last 112 threads). (<ref to="parallel"/>)</p></sol>
+</prob>
+<prob level="medium" tags="GPU">
+<ask><p>Within a warp, half the threads take an if branch costing 200 cycles and half take the else branch costing 100 cycles. How long does the warp take? How could the code be restructured?</p></ask>
+<sol><p>The warp executes both paths serially: <b>300 cycles</b>, with half the lanes idle in each. Reorganize the data or the thread-to-work mapping so that the condition is uniform within each warp (for example, sort or partition the work so whole warps take the same branch), or replace the branch with arithmetic when both paths are short.</p></sol>
+</prob>
+<prob level="medium" tags="GPU">
+<ask><p>Shared memory has 32 banks of 4-byte words. Which accesses by the 32 threads of a warp cause bank conflicts: <code>s[tid]</code>, <code>s[2*tid]</code>, <code>s[32*tid]</code>, <code>s[0]</code>?</p></ask>
+<sol><p><code>s[tid]</code>: each thread a different bank, <b>no conflict</b>. <code>s[2*tid]</code>: banks 0, 2, …, 30, each used twice: <b>2-way conflict</b> (two passes). <code>s[32*tid]</code>: all in bank 0: <b>32-way conflict</b>. <code>s[0]</code>: all threads read the same word, which is <b>broadcast</b> without conflict.</p></sol>
+</prob>
+<prob level="medium" tags="GPU">
+<ask><p>Why do GPUs devote relatively little area to caches and out-of-order logic, and how do they tolerate memory latency instead?</p></ask>
+<sol><p>GPUs optimize throughput rather than single-thread latency. Each SM keeps many warps resident with all their registers on chip, and when one warp waits for memory the scheduler issues instructions from another in the next cycle at no cost. With enough warps in flight, the arithmetic units stay busy despite hundreds of cycles of memory latency, so area goes to ALUs and register files instead of large caches and speculation.</p></sol>
+</prob>
+<prob level="medium" tags="roofline">
+<ask><p>A GPU has 40 TFLOP/s of compute and 1.6 TB/s of memory bandwidth. A kernel performs 4 FLOP per byte loaded. What performance can it reach, and what is the bottleneck?</p></ask>
+<sol><p>min(40, 1.6 × 4) = <b>6.4 TFLOP/s</b>: memory bound. The ridge point is 40/1.6 = 25 FLOP/byte; reaching peak would require improving data reuse (tiling in shared memory, fusing kernels) to raise the intensity.</p></sol>
+</prob>
+<prob level="medium" tags="GPU">
+<ask><p>An SM has 64K 32-bit registers and supports up to 2048 resident threads. A kernel needs 40 registers per thread. How many threads can be resident, and what is the occupancy?</p></ask>
+<sol><p>65,536/40 = 1638 threads, rounded down to whole warps (and allocation granularity): about <b>1632 threads (51 warps)</b> → occupancy ≈ 51/64 ≈ <b>80%</b>. Reducing to 32 registers per thread would allow 2048 threads (100%).</p></sol>
+</prob>
+<prob level="hard" tags="GPU">
+<ask><p>Explain how tiling matrix multiplication into shared memory reduces global-memory traffic, and by roughly what factor for T × T tiles.</p></ask>
+<sol><p>In a naive kernel each thread computing one output element reads a full row of A and column of B from global memory, so every input element is fetched N times. With tiling, a block loads a T × T tile of A and of B into shared memory once, synchronizes, and every thread in the block reuses those values T times. Each global element is therefore loaded N/T times instead of N times: traffic falls by a factor of about <b>T</b> (16 or 32 in practice), raising arithmetic intensity by the same factor.</p></sol>
+</prob>
+<prob level="medium" tags="GPU">
+<ask><p>Many threads atomically increment bins of a 256-bin histogram in global memory, and the kernel is slow. Why, and what is the standard fix?</p></ask>
+<sol><p>Atomics to the same address serialize, and popular bins see heavy contention in global memory. <b>Privatize</b>: each block accumulates a histogram in shared memory (fast atomics, contention only within the block), then adds its 256 bins to the global histogram once at the end.</p></sol>
+</prob>
+<prob level="hard" tags="concurrency, C++">
+<ask><p>Implement an atomic increment using only <code>compare_exchange_weak</code> in C++, and explain why the loop is needed.</p></ask>
+<sol><pre lang="cpp">#include <atomic>
+
+void increment(std::atomic<int>& x)
+{
+    int old = x.load();
+    while (!x.compare_exchange_weak(old, old + 1)) {
+        // on failure, old has been updated to the current value; try again
+    }
+}</pre><p>Another thread may change x between the load and the compare-and-swap; the CAS then fails (and reloads old), and the loop retries with the fresh value. The weak form may also fail spuriously on some architectures, which the loop handles. This read-modify-write retry pattern is the basis of lock-free algorithms.</p></sol>
+</prob>
+<prob level="medium" tags="concurrency">
+<ask><p>What is the difference between a data race and a race condition? Is <code>volatile</code> enough to prevent data races between threads in C++?</p></ask>
+<sol><p>A <b>data race</b> is two threads accessing the same memory location concurrently, at least one writing, without synchronization: undefined behavior in C and C++. A <b>race condition</b> is any bug where correctness depends on timing, which can occur even with atomics (for example check-then-act). <code>volatile</code> is <b>not</b> enough: it neither makes operations atomic nor orders them between threads. Use <code>std::atomic</code>, mutexes, or other synchronization.</p></sol>
+</prob>
+</practice>
+
+<practice title="Circuits, CMOS and analog">
+<prob level="easy" tags="circuits">
+<ask><p>A 12 V source feeds a divider of 8 kΩ (top) and 4 kΩ (bottom). What is the output unloaded, and with a 4 kΩ load?</p></ask>
+<sol><p>Unloaded: 12 × 4/12 = <b>4 V</b>. Loaded: 4 kΩ ∥ 4 kΩ = 2 kΩ → 12 × 2/10 = <b>2.4 V</b>. (<ref to="circuits"/>)</p></sol>
+</prob>
+<prob level="easy" tags="circuits">
+<ask><p>R = 2 kΩ, C = 10 nF. What are the time constant, the 10–90% rise time and the −3 dB frequency of the RC low-pass?</p></ask>
+<sol><p>τ = <b>20 μs</b>; rise time 2.2τ = <b>44 μs</b>; f<sub>c</sub> = 1/(2π × 20 μs) ≈ <b>7.96 kHz</b>.</p></sol>
+</prob>
+<prob level="medium" tags="power">
+<ask><p>A chip has 50 nF of switched capacitance with an activity factor of 0.15, runs at 1.5 GHz and 0.9 V. Estimate its dynamic power, and the power if voltage drops to 0.75 V and frequency to 1.2 GHz.</p></ask>
+<sol><p>P = αCV²f = 0.15 × 50 × 10⁻⁹ × 0.81 × 1.5 × 10⁹ ≈ <b>9.1 W</b>. Scaled: × (0.75/0.9)² × (1.2/1.5) = × 0.694 × 0.8 = × 0.556 → <b>about 5.1 W</b>. (<ref to="cmos"/>)</p></sol>
+</prob>
+<prob level="medium" tags="CMOS">
+<ask><p>Draw (in words) the static CMOS implementation of F = (A + B·C)′. How many transistors?</p></ask>
+<sol><p>Pull-down (NMOS, implements A + BC): A in parallel with the series pair B–C. Pull-up (PMOS, the dual): A in series with the parallel pair B ∥ C. <b>6 transistors</b>.</p></sol>
+</prob>
+<prob level="medium" tags="CMOS">
+<ask><p>Why are NAND gates generally preferred over NOR gates in CMOS?</p></ask>
+<sol><p>A NOR has its PMOS transistors in series. PMOS carriers (holes) are 2 to 3 times slower than electrons, so series PMOS stacks must be made very wide to match drive strength, giving more area and input capacitance (logical effort 5/3 for NOR2 versus 4/3 for NAND2). A NAND puts the series stack in the faster NMOS. High fan-in NORs are especially slow.</p></sol>
+</prob>
+<prob level="medium" tags="interfacing">
+<ask><p>A driver has V<sub>OH</sub> = 2.4 V and V<sub>OL</sub> = 0.4 V; a receiver has V<sub>IH</sub> = 2.0 V and V<sub>IL</sub> = 0.8 V. What are the noise margins? Would a receiver with V<sub>IH</sub> = 3.5 V work?</p></ask>
+<sol><p>NM<sub>H</sub> = 2.4 − 2.0 = <b>0.4 V</b>; NM<sub>L</sub> = 0.8 − 0.4 = <b>0.4 V</b>. With V<sub>IH</sub> = 3.5 V, NM<sub>H</sub> = −1.1 V: <b>no</b>, a high output can fall in the receiver's undefined region; a level shifter is needed. (<ref to="interfacing"/>)</p></sol>
+</prob>
+<prob level="easy" tags="LED">
+<ask><p>Choose a resistor for a green LED (V<sub>F</sub> = 2.2 V) at 8 mA from 3.3 V.</p></ask>
+<sol><p>R = (3.3 − 2.2)/0.008 ≈ <b>137 Ω</b>; use 150 Ω (7.3 mA). The small headroom (1.1 V) makes the current sensitive to V<sub>F</sub> variation.</p></sol>
+</prob>
+<prob level="medium" tags="op-amps">
+<ask><p>Design a non-inverting amplifier with a gain of 11, and an inverting amplifier with a gain of −5 and an input resistance of 10 kΩ.</p></ask>
+<sol><p>Non-inverting: 1 + R<sub>f</sub>/R<sub>g</sub> = 11 → e.g. <b>R<sub>f</sub> = 100 kΩ, R<sub>g</sub> = 10 kΩ</b>. Inverting: R<sub>in</sub> = <b>10 kΩ</b>, R<sub>f</sub> = <b>50 kΩ</b> (−R<sub>f</sub>/R<sub>in</sub> = −5). (<ref to="analog"/>)</p></sol>
+</prob>
+<prob level="hard" tags="CMOS">
+<ask><p>A minimum inverter must drive a load equal to 256 times its own input capacitance. How many inverter stages minimize the delay, and roughly how much faster is that than driving the load directly?</p></ask>
+<sol><p>Delay is minimized with a stage effort near 4: log₄ 256 = <b>4 stages</b>, each 4 times larger than the previous. Using the model delay = effort + 1 per stage: direct = 256 + 1 = 257 units; chain = 4 × (4 + 1) = 20 units, about <b>13 times faster</b>.</p></sol>
+</prob>
+<prob level="medium" tags="interfacing">
+<ask><p>An open-drain interrupt line at 3.3 V has 150 pF of capacitance and must rise from 0 to 2.0 V within 500 ns. Drivers can sink 4 mA at V<sub>OL</sub> = 0.4 V. What range of pull-up resistance works?</p></ask>
+<sol><p>Rise: 3.3(1 − e<sup>−t/RC</sup>) = 2.0 → t = RC·ln(3.3/1.3) = 0.93RC ≤ 500 ns → R ≤ 500 ns/(0.93 × 150 pF) ≈ <b>3.6 kΩ</b>. Sink limit: R ≥ (3.3 − 0.4)/4 mA ≈ <b>725 Ω</b>. Choose, for example, 2.2 kΩ.</p></sol>
+</prob>
+<prob level="medium" tags="ADC">
+<ask><p>A 12-bit ADC with a 3.3 V reference: what is one LSB, and what is the ideal SQNR?</p></ask>
+<sol><p>3.3/4096 ≈ <b>0.81 mV</b>. SQNR ≈ 6.02 × 12 + 1.76 ≈ <b>74 dB</b>.</p></sol>
+</prob>
+<prob level="hard" tags="sampling">
+<ask><p>A 1 kHz sampling system sees a 940 Hz interference tone. At what frequency does it appear, and what should have been done?</p></ask>
+<sol><p>|940 − 1000| = <b>60 Hz</b>, inside the band of interest and indistinguishable from a real 60 Hz signal. An analog <b>anti-aliasing low-pass filter</b> before the ADC must attenuate everything above 500 Hz; aliasing cannot be undone digitally after sampling.</p></sol>
+</prob>
+</practice>
+
+<practice title="Embedded C and bit manipulation">
+<prob level="easy" tags="C">
+<ask><p>Write macros to set, clear, toggle and test bit n of a register r.</p></ask>
+<sol><pre lang="c">#define BIT_SET(r, n)    ((r) |=  (1u << (n)))
+#define BIT_CLR(r, n)    ((r) &= ~(1u << (n)))
+#define BIT_TGL(r, n)    ((r) ^=  (1u << (n)))
+#define BIT_TST(r, n)    (((r) >> (n)) & 1u)</pre><p>The parentheses around every argument and the whole expression protect against operator-precedence surprises when the macros are used with expressions. (<ref to="mcu"/>)</p></sol>
+</prob>
+<prob level="easy" tags="C">
+<ask><p>Write an expression that is true exactly when an unsigned x is a power of two.</p></ask>
+<sol><p><code>x != 0 &amp;&amp; (x &amp; (x - 1)) == 0</code>. Subtracting 1 flips the lowest set bit and every bit below it, so the AND clears the lowest set bit; the result is 0 only if there was just one.</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>Isolate the lowest set bit of x, and clear it.</p></ask>
+<sol><p>Isolate: <b><code>x &amp; -x</code></b> (for unsigned x, −x = ~x + 1, which keeps only the lowest 1). Clear: <b><code>x &amp; (x - 1)</code></b>. For x = 0b10110: x &amp; −x = 0b00010; x &amp; (x − 1) = 0b10100.</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>Reverse the bits of a byte without a loop.</p></ask>
+<sol><pre lang="c">uint8_t rev8(uint8_t x)
+{
+    x = (uint8_t)(((x & 0xF0) >> 4) | ((x & 0x0F) << 4));   // swap nibbles
+    x = (uint8_t)(((x & 0xCC) >> 2) | ((x & 0x33) << 2));   // swap pairs
+    x = (uint8_t)(((x & 0xAA) >> 1) | ((x & 0x55) << 1));   // swap neighbors
+    return x;
+}</pre><p>Each step swaps groups of half the previous size: log₂ 8 = 3 steps. A 256-entry lookup table is the other common answer.</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>What does the <code>volatile</code> qualifier do, and give two situations in embedded code that require it.</p></ask>
+<sol><p>It tells the compiler that the object can change, or that accessing it has effects, outside the code it can see, so every read and write in the source must actually be performed, in order, and not cached in registers or removed. Required for <b>memory-mapped hardware registers</b> and for <b>variables shared between an ISR and the main program</b>. It does not make accesses atomic. (<ref to="interrupts"/>)</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>Give three different meanings of the keyword <code>static</code> in C.</p></ask>
+<sol><p>(1) A <b>local variable</b> declared static keeps its value between calls (static storage duration, initialized once). (2) A <b>global variable or function</b> declared static has internal linkage: visible only within its source file. (3) In an array parameter, <code>int a[static 10]</code> promises at least 10 elements (C99). (In C++ it additionally marks class members shared by all instances.)</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>On a typical 64-bit platform, what is <code>sizeof(struct { char c; double d; short s; })</code>, and how can it be made smaller?</p></ask>
+<sol><p>c at 0, 7 bytes of padding, d at 8–15, s at 16–17, padding to a multiple of 8: <b>24 bytes</b>. Reordering to <code>{ double d; short s; char c; }</code> gives 8 + 2 + 1 + 5 padding = <b>16 bytes</b>. (<ref to="memory"/>)</p></sol>
+</prob>
+<prob level="hard" tags="C">
+<ask><p>Which of these have undefined behavior in C for a 32-bit int x? (a) <code>x &lt;&lt; 32</code> (b) <code>INT_MAX + 1</code> (c) <code>(unsigned)UINT_MAX + 1u</code> (d) <code>-1 &gt;&gt; 1</code> (e) <code>1 &lt;&lt; 31</code></p></ask>
+<sol><p>(a) <b>UB</b>: shifting by the width or more. (b) <b>UB</b>: signed overflow. (c) defined: unsigned arithmetic wraps to 0. (d) <b>implementation-defined</b> (not UB; arithmetic shift giving −1 on common compilers). (e) <b>UB</b> in C (the result is not representable as an int), though common compilers produce INT_MIN; write <code>1u &lt;&lt; 31</code>.</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>A circular buffer has N = 64 entries. Write the index update without a division or a branch, and explain why N should be a power of two.</p></ask>
+<sol><p><code>head = (head + 1) &amp; (N - 1);</code>. For N = 2ᵏ, masking with N − 1 keeps the low k bits, which equals (head + 1) mod N. For other sizes the mask does not compute the modulus, and a % (a division) or a compare-and-reset is needed.</p></sol>
+</prob>
+<prob level="easy" tags="C">
+<ask><p>Swap the two nibbles of a byte, and extract bits 5–2 of a byte as a number.</p></ask>
+<sol><p>Swap: <code>(uint8_t)((x &lt;&lt; 4) | (x &gt;&gt; 4))</code>. Extract bits 5–2: <code>(x &gt;&gt; 2) &amp; 0x0F</code>.</p></sol>
+</prob>
+<prob level="hard" tags="interrupts">
+<ask><p>On an 8-bit microcontroller, a timer ISR increments a 32-bit tick counter. Write a function that safely returns the counter in the main program, and explain the failure it prevents.</p></ask>
+<sol><pre lang="c">#include <util/atomic.h>
+volatile uint32_t ticks;
+
+uint32_t get_ticks(void)
+{
+    uint32_t t;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        t = ticks;                 // four byte reads with interrupts disabled
+    }
+    return t;
+}</pre><p>Reading 32 bits takes four separate byte loads. If the ISR increments the counter between them (for example from 0x0000FFFF to 0x00010000), the main program can assemble a torn value such as 0x0001FFFF that never existed. Disabling interrupts for the four loads makes the read atomic; restoring the previous interrupt state makes the function safe to call from code that already disabled interrupts. (<ref to="interrupts"/>)</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>Every element of an array appears twice except one. Find it in O(n) time and O(1) memory.</p></ask>
+<sol><p>XOR all elements: pairs cancel (a ⊕ a = 0) and XOR is associative and commutative, so the result is the unpaired element. The same identity underlies parity and RAID-5 reconstruction.</p></sol>
+</prob>
+<prob level="medium" tags="C">
+<ask><p>With <code>uint8_t a = 200, b = 100;</code>, what are <code>a + b &gt; 255</code> and <code>(uint8_t)(a + b) &gt; 255</code>? Why?</p></ask>
+<sol><p><code>a + b</code> is computed as an int after promotion, 300, so the first comparison is <b>true</b>. Casting to uint8_t gives 44 before the comparison, so the second is <b>false</b>. Integer promotion means small types never overflow inside an expression; truncation happens only when the result is stored or cast.</p></sol>
+</prob>
+<prob level="hard" tags="debounce">
+<ask><p>Design a hardware debouncer for a push button sampled by a 1 MHz clock, accepting a new level only after it has been stable for 5 ms.</p></ask>
+<sol><p>Synchronize the button with two flip-flops. Keep the current debounced output in a register and a 13-bit counter (5 ms × 1 MHz = 5000 &lt; 2¹³). Each clock: if the synchronized input equals the debounced output, clear the counter; otherwise increment it, and when it reaches 4999, copy the input to the output and clear the counter. Any bounce resets the count, so the output changes only after 5 ms of a stable new level. An edge detector on the output gives a one-cycle "pressed" pulse. (<ref to="swfsm"/>)</p></sol>
+</prob>
+</practice>
+
+<practice title="Verification, implementation and silicon">
+<prob level="medium" tags="FIFO">
+<ask><p>A synchronous FIFO has 8 entries, addressed by a write pointer and a read pointer. When both pointers are equal the FIFO could be empty or full. How do designers tell the two apart without a separate counter?</p></ask>
+<sol><p>Make each pointer one bit wider than the address: <b>4 bits</b> for 8 entries. The low 3 bits address the memory; the extra bit flips every time a pointer wraps around. <b>Empty</b>: all 4 bits equal (the reader has caught up with the writer on the same lap). <b>Full</b>: the low 3 bits equal and the top bits different (the writer is exactly one lap ahead, so write − read = 8). In an asynchronous FIFO the pointers are Gray-coded before crossing clock domains, and the full test becomes: the top two bits differ and the rest are equal. (<ref to="timing"/>)</p></sol>
+</prob>
+<prob level="medium" tags="verification">
+<ask><p>How would you verify a FIFO design? List the checking mechanisms and the scenarios you would make sure to cover.</p></ask>
+<sol><p><b>Checking</b>: a reference model (a simple queue in the testbench) and a scoreboard that compares every word read with the model's next word; assertions that a write when full and a read when empty are refused (or flagged), that the occupancy never exceeds the depth, and that the flags agree with the model. <b>Stimulus</b>: directed tests for reset, filling to full, draining to empty and the error cases, then constrained-random tests with random write and read patterns over long runs. <b>Coverage</b>, to know when to stop: full and empty both reached, simultaneous read and write while empty, full and in between, every pointer wrapping around, back-to-back full/empty transitions. For an asynchronous FIFO, add many clock-frequency ratios and phase relationships and a CDC analysis tool, because simulation alone does not model metastability. (<ref to="verilog"/>)</p></sol>
+</prob>
+<prob level="easy" tags="verification">
+<ask><p>What is the difference between code coverage and functional coverage? Is 100% code coverage enough?</p></ask>
+<sol><p><b>Code coverage</b> is measured automatically from the RTL: which lines, branches, expressions, signal toggles and FSM states and transitions were exercised. <b>Functional coverage</b> is written by the verification engineer from the specification: which features, scenarios and combinations of conditions occurred (for example, "a burst write while the FIFO is one entry from full"). 100% code coverage is <b>not</b> enough: it cannot reveal functionality that is missing from the code, and it does not show that important combinations of conditions occurred together, or that the outputs were checked.</p></sol>
+</prob>
+<prob level="medium" tags="verification">
+<ask><p>Every request must be granted within 1 to 4 cycles. Write this as a SystemVerilog assertion and explain each part.</p></ask>
+<sol><pre lang="sv">assert property (@(posedge clk) disable iff (rst)
+                 req |-> ##[1:4] gnt)
+    else $error("req not granted within 4 cycles");</pre><p><code>@(posedge clk)</code> samples the signals at each rising edge. <code>disable iff (rst)</code> turns the check off during reset. <code>req |-&gt;</code> is an implication: the property is checked starting at every edge where req is 1, and passes trivially elsewhere. <code>##[1:4] gnt</code> requires gnt to be 1 at some edge 1 to 4 cycles later. The same property can be simulated as a checker or proved for all possible inputs by a formal tool.</p></sol>
+</prob>
+<prob level="medium" tags="test">
+<ask><p>What does the stuck-at fault model assume, and what must a test pattern do to detect a stuck-at-0 fault on an internal node? How does scan help?</p></ask>
+<sol><p>It models a manufacturing defect as one node permanently fixed at 0 or 1. To detect stuck-at-0 on node n, a pattern must <b>excite</b> the fault (set the inputs so that a good circuit drives n to 1) and <b>propagate</b> the difference to an observable output (set the other gates along a path so that the output depends on n). Deep inside sequential logic both are hard, because the inputs and outputs of internal logic are flip-flops. Scan chains let the tester load every flip-flop directly and read every flip-flop back, so each block of combinational logic between flip-flops can be tested as if its inputs and outputs were pins; ATPG tools then generate patterns covering typically more than 99% of stuck-at faults. (<ref to="chipflow"/>)</p></sol>
+</prob>
+<prob level="medium" tags="yield">
+<ask><p>A die of 6 cm² is made in a process with 0.1 defects per cm². Using the Poisson model, what fraction of dies are free of defects? Why do very large GPUs ship with some of their SMs disabled?</p></ask>
+<sol><p>Y = e<sup>−D·A</sup> = e<sup>−0.6</sup> ≈ <b>55%</b>. Almost half the dies contain at least one defect, and most defects land in the large replicated arrays of SMs and cache. Designing the product with fewer active units than the die contains (for example 132 of 144 SMs) lets a die with defects in a few SMs be sold after those SMs are fused off, which raises the effective yield far above 55%. Dies are also <b>binned</b> by how many units work and how fast they run, into different products. (<ref to="chipflow"/>)</p></sol>
+</prob>
+<prob level="easy" tags="thermal">
+<ask><p>A processor dissipates 300 W. The thermal resistance from junction to ambient is 0.2 °C/W and the air is at 35 °C. What is the junction temperature? What is the maximum power if the junction must stay below 105 °C?</p></ask>
+<sol><p>T<sub>J</sub> = 35 + 300 × 0.2 = <b>95 °C</b>. P<sub>max</sub> = (105 − 35)/0.2 = <b>350 W</b>.</p></sol>
+</prob>
+<prob level="medium" tags="power delivery">
+<ask><p>A chip draws 200 W at 0.8 V. What current flows, and what total resistance can the power-delivery network have if the IR drop must stay below 2% of the supply?</p></ask>
+<sol><p>I = 200/0.8 = <b>250 A</b>. 2% of 0.8 V is 16 mV, so R ≤ 16 mV/250 A = <b>64 μΩ</b>, the reason a large chip uses thousands of power and ground bumps in parallel, thick upper metal layers, and voltage regulators placed close to the package. Fast changes in current add an L·di/dt droop on top of this, which on-die and package decoupling capacitors supply. (<ref to="chipflow"/>)</p></sol>
+</prob>
+<prob level="medium" tags="power">
+<ask><p>Why does lowering the supply voltage together with the clock frequency (DVFS) save much more energy than lowering the frequency alone?</p></ask>
+<sol><p>Dynamic power is αCV²f, and the energy per operation is αCV², independent of frequency. Lowering only f lowers the power, but the task takes proportionally longer, so the energy to finish it stays about the same (and leakage energy grows, because the chip is on longer). Lowering V reduces the energy per operation quadratically. Voltage cannot drop alone, because gates slow down at lower voltage, so the frequency must drop with it: DVFS pairs each frequency with the lowest voltage that still meets timing. (<ref to="cmos"/>)</p></sol>
+</prob>
+<prob level="medium" tags="FPGA">
+<ask><p>A design that reaches 2 GHz as an ASIC runs at only 300–500 MHz on an FPGA. Why? Why are FPGAs still used in chip development?</p></ask>
+<sol><p>In an FPGA, logic is built from lookup tables and connected through programmable routing, chains of multiplexers and switches whose resistance and capacitance add delay at every hop; routing typically dominates the delay, and a function that is one optimized cell in an ASIC becomes one or more LUTs plus routing. FPGAs are still used because they can be reprogrammed in minutes: whole chips are prototyped or emulated on large FPGA systems before tapeout to run real software and find bugs months before silicon exists, and FPGAs ship in products whose volume does not justify an ASIC. (<ref to="memory"/>)</p></sol>
+</prob>
+<prob level="easy" tags="clocks">
+<ask><p>What does clock-tree synthesis do, and why does the clock network matter so much for power?</p></ask>
+<sol><p>It builds a network of buffers and wires (trees, H-trees or meshes) that distributes the clock from its source to every flip-flop with nearly equal arrival times (low skew) and sharp transitions, within the timing budget. The clock is the only signal that switches twice every cycle (activity factor 1) and it drives the clock pins of every flip-flop, so the clock network can account for a third or more of a chip's dynamic power, which is why clock gating is used so widely. (<ref to="timing"/>)</p></sol>
+</prob>
+<prob level="hard" tags="debug">
+<ask><p>A chip passes all its tests, but in the system it fails occasionally, only when a neighboring high-power block switches from idle to full activity. What are the likely causes, and how would you investigate?</p></ask>
+<sol><p>The symptom points to <b>supply noise</b>: the sudden current step causes a voltage droop (IR drop plus L·di/dt) that slows the gates of the failing block until a critical path misses setup. <b>Crosstalk</b> from switching neighbors and <b>temperature</b> gradients are other candidates. To investigate: reproduce with controlled workloads; check whether the failure disappears at a lower frequency or a higher supply voltage (a strong sign of a timing margin problem); measure the supply with on-die droop detectors or monitors; and compare with power-integrity simulation of that scenario. Fixes include more decoupling capacitance, slowing down the ramp of the aggressor block (staggered wake-up), adaptive clocking that stretches the clock during droops, or more timing margin on the affected paths.</p></sol>
+</prob>
+</practice>
+</module>

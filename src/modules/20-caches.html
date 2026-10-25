@@ -1,0 +1,151 @@
+<module id="caches" num="20" part="5" title="Caches and virtual memory" short="Caches" pre="perf" blurb="Why memory is the bottleneck and how caches hide it: locality, the memory hierarchy, tags, indices and offsets, associativity, replacement and write policies, miss types and average access time, writing cache-friendly code, and virtual memory with TLBs.">
+
+<p>A modern core can execute several instructions per nanosecond, but a read from DRAM takes 60 to 100 nanoseconds: hundreds of cycles. If every load went to main memory, the processor would spend almost all its time waiting. Caches, small fast memories that keep copies of recently used data close to the processor, close most of that gap, and their behavior largely determines the performance of real programs.</p>
+
+<h3>The memory hierarchy</h3>
+<p>Fast memory is small and expensive; large memory is slow and cheap. No single technology offers both, so systems stack several levels, each a copy of part of the level below it.</p>
+<diagram name="memhier">Typical sizes and latencies for a current desktop or server processor. The upper levels are SRAM on the processor die; main memory is DRAM (<ref to="memory"/>).</diagram>
+<p>The hierarchy works because programs exhibit <b>locality</b>:</p>
+<ul>
+<li><b>Temporal locality:</b> data used recently is likely to be used again soon (loop counters, a function's local variables, the instructions of a loop body).</li>
+<li><b>Spatial locality:</b> data near recently used data is likely to be used soon (the next array element, the next instruction).</li>
+</ul>
+<p>A cache exploits temporal locality by keeping what was recently accessed, and spatial locality by moving data in <b>blocks</b> (also called lines), typically 64 bytes: a miss on one byte brings in its whole neighborhood. Caches are managed entirely by hardware and are invisible to the program's correctness, unlike registers, which the compiler manages explicitly.</p>
+
+<h3>Finding data in a cache: tag, index and offset</h3>
+<p>A cache must answer, for every address, "is this block here, and where?" in about a nanosecond. The address is split into three fields:</p>
+<ul>
+<li>The <b>offset</b> selects a byte within the block: log₂(block size) bits.</li>
+<li>The <b>index</b> selects which set of the cache the block can live in: log₂(number of sets) bits.</li>
+<li>The <b>tag</b> is the rest of the address. It is stored alongside the block and compared on every access to confirm that the block in that set is the one requested.</li>
+</ul>
+<p>Each line also has a <b>valid</b> bit (does it hold anything?) and, in write-back caches, a <b>dirty</b> bit (has it been modified?).</p>
+<diagram name="cache_lookup">A 16 KB direct-mapped cache with 64-byte blocks has 256 lines: 6 offset bits, 8 index bits and an 18-bit tag for a 32-bit address. A hit requires the line to be valid and its stored tag to match.</diagram>
+<ex title="Splitting an address">
+<p>For the cache above, the address 0x12345678 has offset = the low 6 bits = 0x38 (byte 56 of the block), index = bits 13 to 6 = 0x59 (line 89), and tag = bits 31 to 14 = 0x48D1. An access hits if line 89 is valid and holds tag 0x48D1. Every address whose bits 13 to 6 are 0x59 competes for that one line.</p>
+</ex>
+
+<h3>Associativity</h3>
+<p>In a <b>direct-mapped</b> cache each block has exactly one possible location. That makes lookup fast and simple (one tag comparison), but two frequently used blocks that share an index evict each other repeatedly, even if the rest of the cache is empty.</p>
+<p>An <b>N-way set-associative</b> cache groups lines into sets of N; a block can go in any of the N ways of its set. A lookup reads all N tags of the set in parallel and compares them simultaneously, using N comparators and an N-to-1 multiplexer for the data. A <b>fully associative</b> cache is a single set: any block can go anywhere, at the cost of comparing against every tag. For a cache of capacity C, block size B and associativity N, the number of sets is C/(B·N). Typical L1 caches are 8- to 12-way, and larger caches 16-way or more.</p>
+<p>When a set is full, a <b>replacement policy</b> picks the victim. Least recently used (LRU) works well but is costly to track exactly beyond a few ways, so hardware uses approximations (pseudo-LRU trees) or even random replacement for large caches.</p>
+<tool name="cache"/>
+
+<h3>Writes</h3>
+<ul>
+<li><b>Write-through:</b> every write updates both the cache and the next level. Simple and always consistent, but it generates a lot of traffic, so it is paired with a write buffer that absorbs bursts.</li>
+<li><b>Write-back:</b> writes update only the cache and set the line's dirty bit; the block is written to the next level only when it is evicted. Much less traffic when data is written repeatedly; this is what most caches above main memory use.</li>
+<li>On a write miss, <b>write-allocate</b> brings the block into the cache and then writes it (natural with write-back); <b>no-write-allocate</b> writes straight to the next level.</li>
+</ul>
+
+<h3>Why misses happen</h3>
+<ul>
+<li><b>Compulsory</b> (cold) misses: the first access to a block. Larger blocks and prefetching reduce them.</li>
+<li><b>Capacity</b> misses: the program's working set is larger than the cache. Only a larger cache, or a program that reuses data in smaller pieces, helps.</li>
+<li><b>Conflict</b> misses: too many active blocks map to the same set. More associativity reduces them.</li>
+<li>In multiprocessors, <b>coherence</b> misses occur when another core's write invalidates a cached copy (<ref to="parallel"/>).</li>
+</ul>
+
+<h3>Average memory access time</h3>
+<p>Cache performance is summarized by the average memory access time:</p>
+<eq c>AMAT = hit time + miss rate × miss penalty</eq>
+<p>With several levels, the miss penalty of one level is the AMAT of the next: AMAT = t<sub>L1</sub> + m<sub>L1</sub>·(t<sub>L2</sub> + m<sub>L2</sub>·t<sub>mem</sub>), where m<sub>L2</sub> is the <b>local</b> miss rate of L2 (misses per access that reaches L2). With t<sub>L1</sub> = 1 ns, m<sub>L1</sub> = 10%, t<sub>L2</sub> = 5 ns, m<sub>L2</sub> = 20% and t<sub>mem</sub> = 100 ns, AMAT = 1 + 0.1 × (5 + 0.2 × 100) = 3.5 ns. Without L2 it would be 1 + 0.1 × 100 = 11 ns.</p>
+<p>In processor terms, misses add stall cycles: CPI = CPI<sub>base</sub> + (memory accesses per instruction) × (miss rate) × (miss penalty in cycles). A miss penalty of 200 cycles with a 1% miss rate on 0.3 data accesses per instruction adds 0.6 to the CPI, which is why out-of-order processors try so hard to keep working while misses are outstanding (<ref to="perf"/>).</p>
+
+<h3>Writing cache-friendly code</h3>
+<p>The same algorithm can run several times faster or slower depending on its memory access pattern. C stores two-dimensional arrays in <b>row-major</b> order: a[r][0], a[r][1], … are consecutive in memory.</p>
+<diagram name="row_major">Traversing along rows uses every byte of each fetched cache line; traversing down columns jumps a whole row per access.</diagram>
+<pre lang="c">// Good: the inner loop walks consecutive addresses (stride 1)
+for (int r = 0; r < N; r++)
+    for (int c = 0; c < N; c++)
+        sum += a[r][c];
+
+// Bad for large N: the inner loop jumps N * sizeof(int) bytes per access
+for (int c = 0; c < N; c++)
+    for (int r = 0; r < N; r++)
+        sum += a[r][c];   //!</pre>
+<p>With 4-byte ints and 64-byte lines, the first loop misses once per 16 elements. In the second, if N is large enough that a column's worth of lines does not fit in the cache, every access misses: 16 times more misses for identical arithmetic. Other standard techniques:</p>
+<ul>
+<li><b>Loop interchange</b> reorders nested loops so the innermost loop has stride 1.</li>
+<li><b>Blocking (tiling)</b> splits a large computation, such as matrix multiplication, into sub-blocks small enough to stay in the cache while they are reused, turning capacity misses into hits. GPU programs do the same with on-chip shared memory (<ref to="parallel"/>).</li>
+<li><b>Structure of arrays</b> instead of array of structures, when a loop uses only one field: the loop then streams through one dense array instead of skipping over the unused fields.</li>
+<li>Keep hot data compact and aligned, and avoid pointer-chasing structures (linked lists) in performance-critical loops: each node may be a separate miss.</li>
+</ul>
+
+<h3>Virtual memory</h3>
+<p>Programs do not use physical addresses directly. Each process sees its own <b>virtual address space</b>, which the hardware translates to physical addresses using tables maintained by the operating system. This isolates processes from each other, lets each program be linked as if it owned the whole address space, enforces permissions (read, write, execute, kernel-only), and lets the OS keep only the actively used parts of a program in DRAM.</p>
+<p>Translation works in units of <b>pages</b>, typically 4 KB. The low 12 bits of an address (the page offset) are unchanged; the upper bits, the virtual page number, are mapped through a <b>page table</b> to a physical page number. Because a flat table for a 48-bit address space would be enormous, page tables are trees of several levels, and walking them takes several memory accesses. To avoid that on every access, the processor caches recent translations in a <b>translation lookaside buffer</b> (TLB), a small, highly associative cache of page table entries.</p>
+<diagram name="vm_translate">Translation through the TLB. A TLB miss triggers a page table walk; if the page is not in memory at all, a page fault transfers control to the operating system, which loads it from storage.</diagram>
+<p>Translation and caching interact. Many L1 caches are <b>virtually indexed, physically tagged</b>: the index bits are taken from the page offset, which needs no translation, so the cache lookup starts in parallel with the TLB lookup. That works only if the cache's size divided by its associativity is at most the page size, one reason L1 caches are typically 32 to 48 KB with 8 to 12 ways.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Locality (temporal and spatial) lets small fast caches serve most accesses; data moves in 64-byte blocks.</li>
+<li>Address = tag | index | offset. Offset bits = log₂ B; sets = C/(B·N); index bits = log₂ sets.</li>
+<li>Direct-mapped is fast but suffers conflict misses; N-way set-associative compares N tags in parallel; replacement is LRU or an approximation.</li>
+<li>Write-back + write-allocate is the norm; write-through needs a write buffer.</li>
+<li>Misses: compulsory, capacity, conflict (+ coherence). AMAT = hit time + miss rate × miss penalty, applied level by level.</li>
+<li>Stride-1 access, loop interchange, blocking and compact layouts make code cache-friendly.</li>
+<li>Virtual memory translates pages through page tables; the TLB caches translations.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>A 32 KB direct-mapped cache has 64-byte blocks and 32-bit addresses. How many offset, index and tag bits are there?</p></ask>
+<sol><p>Offset: log₂ 64 = <b>6</b>. Lines: 32 KB/64 B = 512 → index <b>9</b>. Tag: 32 − 9 − 6 = <b>17</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>A cache has a 1 ns hit time, a 5% miss rate and an 80 ns miss penalty. What is the AMAT?</p></ask>
+<sol><p>1 + 0.05 × 80 = <b>5 ns</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Repeat the address split for a 32 KB, 4-way set-associative cache with 64-byte blocks and 32-bit addresses.</p></ask>
+<sol><p>Sets = 32 KB/(64 × 4) = 128 → index <b>7</b> bits; offset <b>6</b>; tag 32 − 13 = <b>19</b>. Higher associativity means fewer sets, so fewer index bits and more tag bits.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Classify each miss as compulsory, capacity or conflict: (a) the first time a program touches an array; (b) a loop over a 1 MB array, repeated, with a 256 KB cache; (c) two small arrays whose addresses differ by exactly the cache size, accessed alternately in a direct-mapped cache.</p></ask>
+<sol><p>(a) <b>compulsory</b>; (b) <b>capacity</b>: the working set does not fit no matter how it is placed; (c) <b>conflict</b>: they map to the same lines and evict each other although the cache is mostly empty.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why do caches transfer 64-byte blocks instead of just the bytes requested?</p></ask>
+<sol><p>To exploit spatial locality: neighboring data is likely to be needed soon, and DRAM delivers a burst of consecutive bytes for little more than the cost of the first one. Larger blocks reduce compulsory misses and amortize the per-access overhead, but blocks that are too large waste bandwidth and cache space on unused bytes and increase conflict misses.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A direct-mapped cache has 4 lines of 4 bytes. Trace the byte addresses 0x00, 0x04, 0x10, 0x00, 0x14, 0x04, 0x10, giving hit or miss for each. Then repeat with a 2-way set-associative cache of the same total size (2 sets, LRU).</p></ask>
+<sol><p>Direct-mapped, index = (address &gt;&gt; 2) mod 4: 0x00 → line 0 miss; 0x04 → line 1 miss; 0x10 → line 0 miss (evicts 0x00); 0x00 → miss (evicts 0x10); 0x14 → line 1 miss (evicts 0x04); 0x04 → miss; 0x10 → miss. <b>7 misses.</b></p>
+<p>2-way, set = (address &gt;&gt; 2) mod 2: 0x00 → set 0 miss; 0x04 → set 1 miss; 0x10 → set 0 miss (both fit); 0x00 → <b>hit</b>; 0x14 → set 1 miss; 0x04 → <b>hit</b>; 0x10 → <b>hit</b>. <b>4 misses, 3 hits</b>: the extra way removed the conflict misses.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>L1: 1 ns hit, 8% miss rate. L2: 6 ns hit, 25% local miss rate. Memory: 90 ns. Compute the AMAT with and without the L2, and the global L2 miss rate.</p></ask>
+<sol><p>With L2: 1 + 0.08 × (6 + 0.25 × 90) = 1 + 0.08 × 28.5 = <b>3.28 ns</b>. Without: 1 + 0.08 × 90 = <b>8.2 ns</b>. Global L2 miss rate (fraction of all accesses that go to memory): 0.08 × 0.25 = <b>2%</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A processor has a base CPI of 1.0. Each instruction makes one instruction fetch and, on average, 0.3 data accesses. The instruction cache misses 2% of fetches and the data cache 5% of accesses; each miss costs 100 cycles. What is the effective CPI?</p></ask>
+<sol><p>CPI = 1 + 1 × 0.02 × 100 + 0.3 × 0.05 × 100 = 1 + 2 + 1.5 = <b>4.5</b>. Memory stalls make this processor four and a half times slower than its ideal, which is why miss rates of a few percent matter so much.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 1024 × 1024 array of 4-byte ints is summed with a cache of 32 KB and 64-byte lines. Estimate the number of cache misses for row-order and for column-order traversal.</p></ask>
+<sol><p>Row order: one miss per 16 ints: 2²⁰/16 = <b>65,536 misses</b>. Column order: walking down one column touches 1024 different lines (one per row), 64 KB of lines, more than the 32 KB cache, so the lines are evicted before the next column could reuse them: essentially <b>every access misses, about 1,048,576 misses</b>, 16 times more.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A loop writes 1000 times to the same 4-byte variable. How much traffic reaches the next memory level with a write-through cache and with a write-back cache?</p></ask>
+<sol><p>Write-through: every write is forwarded: <b>1000 writes</b> (4 KB of traffic, possibly merged by a write buffer). Write-back: the line is marked dirty and written back once, when it is eventually evicted: <b>one 64-byte block write</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A system has 32-bit virtual addresses and 4 KB pages, with 4-byte page table entries. How large is a single-level page table for one process? Why do real systems use multi-level tables?</p></ask>
+<sol><p>The VPN has 32 − 12 = 20 bits: 2²⁰ entries × 4 B = <b>4 MB</b> per process, mostly describing unused address space. A two-level table allocates second-level tables only for regions in use, so a small process needs a few kilobytes. For 48-bit addresses the flat table would be 512 GB, so four or five levels are used.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>For blocked (tiled) multiplication of double-precision matrices, three B × B tiles (one each of A, B and C) should fit in a 32 KB L1 cache. What is the largest power-of-two tile size B? Why does tiling reduce misses?</p></ask>
+<sol><p>3 × 8 bytes × B² ≤ 32,768 → B² ≤ 1365 → B ≤ 36, so <b>B = 32</b> (24 KB, leaving room for other data). Without tiling, each element of B is loaded once per row of A, and for large matrices it has been evicted by the time it is needed again (capacity misses). With tiles that stay resident, each loaded element is reused B times before eviction, cutting memory traffic by roughly a factor of B.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An L1 cache is virtually indexed and physically tagged with 4 KB pages. Why must cache size/associativity be at most 4 KB? Give two cache configurations that satisfy this for a 48 KB cache and a 32 KB cache.</p></ask>
+<sol><p>The index and offset bits must lie within the 12-bit page offset, which is the same in virtual and physical addresses, so the set can be selected before translation finishes. Bytes per way = size/associativity must be ≤ 4 KB (2¹² bytes). <b>48 KB → 12-way</b> (4 KB per way); <b>32 KB → 8-way</b>. This is why L1 associativity grows when L1 capacity grows.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A TLB has 64 entries. What is its reach (the memory it can map without misses) with 4 KB pages and with 2 MB pages? Why do large-memory applications such as databases and GPU drivers use huge pages?</p></ask>
+<sol><p>4 KB pages: 64 × 4 KB = <b>256 KB</b>. 2 MB pages: 64 × 2 MB = <b>128 MB</b>. A program touching gigabytes of data with 4 KB pages takes TLB misses constantly, each costing a page table walk of several memory accesses; huge pages extend the reach by 512 times and also shorten the walks.</p></sol>
+</prob>
+</practice>
+</module>

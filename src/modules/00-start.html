@@ -1,0 +1,95 @@
+<module id="start" num="0" title="How this guide works" short="Start here" badge="Start" blurb="What the guide covers, how each module is laid out, how to use the practice problems and tools, and a few suggested routes through the material.">
+
+<p>This guide teaches digital hardware from the bottom up. It starts with how a voltage on a wire comes to stand for a 0 or a 1, builds through logic gates, arithmetic circuits, memory elements and state machines, and arrives at processors, memory systems, microcontrollers and GPUs. Along the way it covers the electrical layer (circuits, transistors, CMOS, interfacing between chips) and the implementation layer (Verilog, power, heat and the chip design flow). No prior hardware knowledge is assumed, but the explanations are written to be precise rather than casual: every term is defined, every formula is derived or justified, and worked examples show each method step by step.</p>
+
+<h3>How the guide is organized</h3>
+<p>The material is split into eight parts and 28 numbered modules. The parts follow the levels of abstraction a hardware engineer works across:</p>
+<grid>Part | Covers | Modules
+I. Foundations | the digital abstraction, number systems, signed and real-number arithmetic | 1 to 4
+II. Combinational logic | Boolean algebra, canonical forms, minimization, decoders, multiplexers, adders, ALUs | 5 to 9
+III. Circuits and the physical layer | circuit laws, RC behavior and filters, analog building blocks, CMOS, chip-to-chip interfacing | 10 to 13
+IV. Sequential logic | latches, flip-flops, registers, counters, state machines, timing and synchronization | 14 to 17
+V. Computer organization | datapaths and control, performance and pipelining, caches, memories and FPGAs, GPUs | 18 to 22
+VI. Embedded systems | microcontroller I/O and bit manipulation in C, software state machines, interrupts, timers, serial buses | 23 to 26
+VII. Implementation | Verilog and RTL design, power, heat and the chip design flow | 27 and 28
+VIII. Reference and practice | formula and fact sheet, glossary, interview problem set | at the end</grid>
+<p>Each module opens with a title block. Its last row lists the modules it <b>builds on</b> (read those first if a term is unfamiliar), the <b>tools</b> embedded in it, and the number of <b>practice problems</b> at its end. The contents panel on the left lists every module; the module you are reading expands to show its sections. The box at the top of that panel finds headings, defined terms and tools by name.</p>
+
+<h3>Callouts</h3>
+<p>Five kinds of note appear throughout. Each has a handwritten label naming its kind, so you can tell at a glance whether to memorize it, follow it step by step or watch out for it.</p>
+<def term="Definition">
+<p>A term defined precisely, in the form you should be able to state from memory. Every definition also appears in the searchable glossary in Part VIII.</p>
+</def>
+<key>
+<p>The one idea from a section that everything else depends on. If you remember nothing else from the section, remember this.</p>
+</key>
+<ex title="A method applied to a concrete case">
+<p>A complete calculation or design, with every step shown, that you can copy as a template.</p>
+</ex>
+<warn>
+<p>An error that students and engineers make often, and how to avoid it.</p>
+</warn>
+<prac>
+<p>How the idea shows up in real products, datasheets, tools or code.</p>
+</prac>
+<p>Some sections end with a dashed <b>going deeper</b> panel. These hold derivations and extra detail that are worth reading once the main idea is solid; nothing later in the guide depends on them.</p>
+<p>Highlighted words are the key terms of a section; in solutions the highlight marks the answer. In diagrams and timing diagrams, cardinal marks the path or signal under discussion, gold marks a signal at logic 1 or an active element, and orange marks errors, unknown (X) values and cache misses. Each module's summary is a checklist of what you should now be able to state or do; if an item is unfamiliar, reread its section before starting the problems.</p>
+
+<h3>Practice problems</h3>
+<p>Every module ends with problems at four levels. The level badge carries a small meter so the difficulty is readable at a glance.</p>
+<div class="cards">
+  <div><h4><span class="lvl lvl-intro"><span class="meter" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i></span>Intro</span></h4><p>Checks a definition or a single fact. You should be able to answer it right after reading the section.</p></div>
+  <div><h4><span class="lvl lvl-easy"><span class="meter" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i></span>Easy</span></h4><p>Applies one method to a new case: a conversion, a truth table, one formula.</p></div>
+  <div><h4><span class="lvl lvl-medium"><span class="meter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Medium</span></h4><p>Combines two or three ideas, or asks you to design something small. Typical of a course exam.</p></div>
+  <div><h4><span class="lvl lvl-hard"><span class="meter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>Hard</span></h4><p>A multi-step design or analysis, often with a trap. Typical of a technical interview.</p></div>
+</div>
+<p>Work each problem on paper before opening anything. If you are stuck, open the <b>hint</b>; then check yourself against the <b>solution</b>, which shows the full reasoning rather than just the answer. Tick <b>Got it</b> only when you could solve the problem again without looking. The toolbar filters problems by level, hides the ones you have finished, and jumps to a random unfinished problem, which is a good way to review. Ticks are saved in this browser only.</p>
+
+<h3>Interactive tools</h3>
+<p>Sixteen tools sit inside the modules that explain them. Use them to check your own work, not to replace it: solve the problem first, then confirm with the tool.</p>
+<grid>Tool | What it does | In module
+<a href="#tool-numconv">Number converter</a> | one bit pattern read as unsigned, two's complement, sign-magnitude, one's complement, excess, BCD and ASCII | 2
+<a href="#tool-adder">4-bit adder and subtractor</a> | carries and the C, V, Z, N flags for any operands | 3
+<a href="#tool-float">Floating-point explorer</a> | encodes and decodes FP32, FP16 and BF16 bit by bit, with the exact stored value | 4
+<a href="#tool-gates">Gate playground</a> | the eight basic gates with live inputs | 5
+<a href="#tool-truthtable">Truth table and simplifier</a> | any expression to a truth table, canonical forms, minimal SOP and POS | 6
+<a href="#tool-kmap">K-map solver</a> | 2 to 4 variable maps with don't cares; minimal SOP or POS with the groups shown | 7
+<a href="#tool-rcfilter">RC filter explorer</a> | cutoff frequency, Bode magnitude plot and step response | 10
+<a href="#tool-cmos">CMOS switch-level explorer</a> | which transistors conduct in an inverter, NAND, NOR or AOI gate | 12
+<a href="#tool-latchlab">Latch vs flip-flop lab</a> | draw a data waveform and compare a latch with a flip-flop | 14
+<a href="#tool-fsmgen">Sequence detector generator</a> | the state table for any bit pattern, Moore or Mealy, with overlap or without | 16
+<a href="#tool-timing">Setup and hold slack calculator</a> | slack, f<sub>max</sub> and the effect of clock skew | 17
+<a href="#tool-pipeline">Pipeline hazard visualizer</a> | cycle-by-cycle diagram with stalls and forwarding | 19
+<a href="#tool-amdahl">Amdahl's law</a> | speedup as a function of the parallel fraction and processor count | 19
+<a href="#tool-cache">Cache simulator</a> | hits, misses and evictions for any address sequence | 20
+<a href="#tool-bitfiddle">Register bit-fiddling playground</a> | C statements on 8-bit microcontroller registers, including common bugs | 23
+<a href="#tool-avrtimer">AVR timer calculator</a> | prescaler and compare values for a timer interrupt, plus PWM frequencies | 25</grid>
+
+<h3>Suggested routes</h3>
+<p>The modules are written to be read in order, but you do not have to. These routes cover a goal in a sensible sequence.</p>
+<div class="paths">
+  <div><h4>Digital design core</h4><p>The material of a first digital logic course, through synchronous design and HDL.</p>
+  <ol><li><a href="#digital">Digital abstraction</a></li><li><a href="#numbers">Number systems</a></li><li><a href="#signed">Signed arithmetic</a></li><li><a href="#boolean">Boolean algebra</a></li><li><a href="#canonical">Canonical forms</a></li><li><a href="#kmaps">K-maps</a></li><li><a href="#blocks">Decoders and muxes</a></li><li><a href="#arith">Adders and ALUs</a></li><li><a href="#latches">Latches and flip-flops</a></li><li><a href="#registers">Registers and counters</a></li><li><a href="#fsm">State machines</a></li><li><a href="#timing">Timing</a></li><li><a href="#verilog">Verilog</a></li></ol></div>
+  <div><h4>Embedded systems</h4><p>Programming and interfacing a microcontroller at the register level.</p>
+  <ol><li><a href="#numbers">Number systems</a></li><li><a href="#signed">Signed arithmetic</a></li><li><a href="#boolean">Boolean algebra</a></li><li><a href="#mcu">Microcontrollers and GPIO</a></li><li><a href="#swfsm">Software state machines</a></li><li><a href="#interrupts">Interrupts and timers</a></li><li><a href="#devices">LCDs and serial buses</a></li><li><a href="#circuits">Circuit fundamentals</a></li><li><a href="#interfacing">Electrical interfacing</a></li></ol></div>
+  <div><h4>Computer architecture</h4><p>From a datapath to caches, pipelines and GPUs.</p>
+  <ol><li><a href="#signed">Signed arithmetic</a></li><li><a href="#float">Floating point</a></li><li><a href="#arith">Adders and ALUs</a></li><li><a href="#timing">Timing</a></li><li><a href="#datapath">Datapath and control</a></li><li><a href="#perf">Performance and pipelining</a></li><li><a href="#caches">Caches</a></li><li><a href="#memory">Memories and FPGAs</a></li><li><a href="#parallel">Parallelism and GPUs</a></li></ol></div>
+  <div><h4>Circuits and silicon</h4><p>The electrical and physical side of chips.</p>
+  <ol><li><a href="#digital">Digital abstraction</a></li><li><a href="#circuits">Circuit fundamentals</a></li><li><a href="#analog">Analog building blocks</a></li><li><a href="#cmos">Transistors and CMOS</a></li><li><a href="#interfacing">Electrical interfacing</a></li><li><a href="#timing">Timing</a></li><li><a href="#chipflow">Power, heat and design flow</a></li></ol></div>
+  <div><h4>Interview preparation</h4><p>For someone who has seen the material before and wants to test it.</p>
+  <ol><li>Skim the <a href="#reference">formula sheet</a></li><li>Work the <a href="#interview">interview problem set</a> by section</li><li>For every miss, reread the linked module and do its medium and hard problems</li><li>Finish with <b>Random problem</b> on the Hard filter</li></ol></div>
+</div>
+
+<h3>Notation</h3>
+<p>Boolean algebra has several competing notations. This guide uses the first column; you will meet the others in textbooks, datasheets and code.</p>
+<grid>Written here | Meaning | Also written
+A′ | NOT A, the complement of A | <span class="ov">A</span>, ¬A, ~A (C bitwise), !A (C logical)
+A·B or AB | A AND B | A∧B, A &amp; B, A &amp;&amp; B
+A + B | A OR B (not addition, unless the context is arithmetic) | A∨B, A &#124; B, A &#124;&#124; B
+A ⊕ B | A XOR B, exclusive OR | A ^ B
+1011₂, 0b1011 | a binary number | 1011b
+0x2F, 2F₁₆ | a hexadecimal number | 2Fh, 8'h2F (Verilog)
+X[7:0] | bits 7 down to 0 of a multi-bit signal X | X<sub>7..0</sub>
+Q* or Q⁺ | the next value of state Q, after the coming clock edge | Q(t+1), Q<sub>next</sub></grid>
+<p>Units follow SI. Memory sizes use binary prefixes when the distinction matters: 1 KiB = 2¹⁰ bytes, 1 MiB = 2²⁰ bytes, 1 GiB = 2³⁰ bytes. Time and frequency use decimal prefixes: 1 ns = 10⁻⁹ s, 1 GHz = 10⁹ Hz.</p>
+</module>

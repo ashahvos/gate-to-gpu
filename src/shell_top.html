@@ -1,0 +1,54 @@
+<title>Gate to GPU</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="A study guide for digital hardware: number systems, Boolean algebra, combinational and sequential design, CMOS, timing, processors, memory, embedded systems, Verilog and chip design, with practice and interview problems.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&family=Kalam:wght@400;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&display=swap">
+<style>
+{{STYLE}}
+</style>
+<button class="btn fab" id="fabBtn" type="button" aria-controls="side">Contents</button>
+<div class="app">
+  <nav class="side" id="side" aria-label="Contents">
+    <button class="btn ghost sm side-close" id="sideClose" type="button">Close</button>
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><path class="bi-l" d="M3 13 H11 M3 23 H11 M29 18 H31"/><path class="bi-g" d="M11 7 H18 A11 11 0 0 1 18 29 H11 Z"/><circle class="bi-o" cx="32.4" cy="18" r="2.6"/></svg>
+      <span><b>Gate to GPU</b><span>Digital hardware study guide</span></span>
+    </a>
+    <div class="find">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.5" cy="6.5" r="4.8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.2 10.2 L14.5 14.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <input type="search" id="find" placeholder="Find a topic or term" autocomplete="off" spellcheck="false" aria-label="Find a topic or term" aria-controls="findres">
+    </div>
+    <ul class="findres" id="findres" hidden></ul>
+    <ol class="navlist" id="navlist"></ol>
+    <p class="side-foot">The numbers count the problems you have marked as done. Progress is saved in this browser only.</p>
+  </nav>
+  <main id="main">
+    <div class="toolbar" role="region" aria-label="Practice controls">
+      <button class="btn ghost sm menu-btn" id="menuBtn" type="button" aria-controls="side" aria-expanded="false">Contents</button>
+      <div class="seg" role="group" aria-label="Show problems by difficulty">
+        <button type="button" data-level="all" aria-pressed="true">All</button>
+        <button type="button" data-level="intro" aria-pressed="false">Intro</button>
+        <button type="button" data-level="easy" aria-pressed="false">Easy</button>
+        <button type="button" data-level="medium" aria-pressed="false">Medium</button>
+        <button type="button" data-level="hard" aria-pressed="false">Hard</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="hideDone"> Hide finished</label>
+      <button class="btn sm" id="randBtn" type="button">Random problem</button>
+      <span class="tbmsg" id="tbMsg" aria-live="polite"></span>
+      <div class="prog" title="Problems you have marked as done"><span id="progTxt">0 of {{NPROB}} done</span><span class="bar"><i id="progBar"></i></span></div>
+    </div>
+    <header class="hero" id="top">
+      <h1>Gate to GPU</h1>
+      <p class="lede">Digital hardware from the transistor up: number systems, Boolean algebra, combinational and sequential design, CMOS circuits, timing, processors and memory, microcontrollers and interrupts, Verilog, and how chips are built. Each module explains the ideas in depth and ends with practice problems and worked solutions; a formula sheet, a glossary and a set of interview-style problems close the guide.</p>
+      <ol class="ladder" aria-label="Levels of abstraction covered in this guide">
+        <li><a href="#cmos"><svg viewBox="0 0 64 46" aria-hidden="true"><path class="la" d="M6 23 H22"/><path class="lg" d="M22 12 V34 M28 8 V38 M28 13 H44 V3 M28 33 H44 V43"/></svg><b>Transistor</b><span>a switch controlled by a voltage</span></a></li>
+        <li><a href="#boolean"><svg viewBox="0 0 64 46" aria-hidden="true"><path class="lg" d="M4 15 H18 M4 31 H18"/><path class="lb" d="M18 7 H30 A16 16 0 0 1 30 39 H18 Z"/><circle class="lb" cx="50" cy="23" r="3.6"/><path class="la" d="M54 23 H62"/></svg><b>Logic gate</b><span>a Boolean function built from switches</span></a></li>
+        <li><a href="#blocks"><svg viewBox="0 0 64 46" aria-hidden="true"><path class="lg" d="M4 14 H20 M4 32 H20 M32 44 V36"/><path class="lb" d="M20 4 L44 12 V34 L20 42 Z"/><path class="la" d="M44 23 H60"/></svg><b>Building block</b><span>muxes, decoders, adders</span></a></li>
+        <li><a href="#latches"><svg viewBox="0 0 64 46" aria-hidden="true"><rect class="lb" x="16" y="5" width="30" height="36" rx="2"/><path class="lg" d="M4 14 H16 M4 32 H16 M16 27 L22 32 L16 37"/><path class="la" d="M46 14 H60"/></svg><b>Flip-flop</b><span>one stored bit, updated on a clock edge</span></a></li>
+        <li><a href="#fsm"><svg viewBox="0 0 64 46" aria-hidden="true"><circle class="lb" cx="15" cy="23" r="10"/><circle class="lc" cx="49" cy="23" r="10"/><path class="lg" d="M24 17 Q32 10 40 17 M40 29 Q32 36 24 29"/><path class="lf" d="M40 17 l-5 -0.5 l2.5 -4 z M24 29 l5 0.5 l-2.5 4 z"/></svg><b>State machine</b><span>state plus next-state logic</span></a></li>
+        <li><a href="#datapath"><svg viewBox="0 0 64 46" aria-hidden="true"><path class="lb" d="M10 6 H27 L32 14 L37 6 H54 L43 38 H21 Z"/><path class="lg" d="M18 0 V6 M46 0 V6"/><path class="la" d="M32 38 V46"/></svg><b>Processor</b><span>datapath plus control</span></a></li>
+        <li><a href="#parallel"><svg viewBox="0 0 64 46" aria-hidden="true"><rect class="lb" x="6" y="4" width="52" height="38" rx="3"/><g class="lg" style="stroke-width:1.4"><rect x="11" y="9" width="8" height="8"/><rect x="23" y="9" width="8" height="8"/><rect x="35" y="9" width="8" height="8"/><rect x="47" y="9" width="6" height="8"/><rect x="11" y="21" width="8" height="8"/><rect x="35" y="21" width="8" height="8"/><rect x="47" y="21" width="6" height="8"/><rect x="11" y="33" width="8" height="5"/><rect x="23" y="33" width="8" height="5"/><rect x="47" y="33" width="6" height="5"/></g><rect class="lf" x="23" y="21" width="8" height="8"/><rect class="lf" x="35" y="33" width="8" height="5"/></svg><b>GPU</b><span>thousands of simple cores in parallel</span></a></li>
+      </ol>
+      <p class="hero-meta">{{HEROMETA}}</p>
+    </header>

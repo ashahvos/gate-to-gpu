@@ -1,0 +1,131 @@
+<module id="registers" num="15" part="4" title="Registers, counters and shift registers" short="Registers and counters" pre="latches,arith" blurb="Flip-flops in groups: registers with load enables and the right way to gate a clock, shift registers and LFSRs, synchronous counters with reset, load and enable, ring and Johnson counters, and frequency dividers.">
+
+<p>A single flip-flop stores one bit. Real designs store words, and the standard sequential components are all groups of flip-flops sharing a clock, with a little combinational logic in front of their D inputs that decides what each one loads at the next edge. That logic is what distinguishes a register from a counter from a shift register.</p>
+
+<h3>Registers and load enables</h3>
+<p>A <b>register</b> is n flip-flops sharing a clock (and usually a reset), storing an n-bit word. A plain register loads its input at every clock edge. Most registers must instead hold their value until told to load, which needs an enable: when EN = 0, Q* = Q.</p>
+<diagram name="reg_enable">A register with enable. Each bit has a 2-to-1 mux that feeds the flip-flop either the new data or its own output, so with EN = 0 the register reloads the value it already holds.</diagram>
+<p>The enable belongs on the data path, not on the clock. It is tempting to AND the clock with the enable so that the register simply sees no edge, but logic on a clock path delays that register's clock relative to every other register (skew), and if the enable changes while the clock is high, the AND gate passes a truncated pulse or an extra edge.</p>
+<wavegen name="icg_wave">The problem with CLK·EN: EN changes while CLK is high, producing a short pulse that may or may not clock the register. Latching EN while the clock is low, as the integrated clock-gating cell below does, only ever passes whole clock pulses.</wavegen>
+<p>Clock gating is nevertheless one of the most effective power-saving techniques, because an idle register that receives no clock edges consumes no dynamic power in its flip-flops or its clock wiring (<ref to="cmos"/>). It is done with a dedicated <b>integrated clock-gating (ICG) cell</b>: a latch that is transparent while the clock is low captures the enable, and an AND gate combines the latched enable with the clock. Because the latch output can only change while the clock is low, the AND gate's enable input is stable whenever the clock is high. Synthesis tools insert ICG cells automatically when they recognize the enable-mux pattern on a group of flip-flops.</p>
+<diagram name="clock_gate">An unsafe gated clock and the integrated clock-gating cell that replaces it.</diagram>
+
+<h3>Shift registers</h3>
+<p>Connecting each flip-flop's output to the next one's input makes a <b>shift register</b>: at each edge every bit moves one position, the first flip-flop loads a serial input, and the last one's old value falls off the end.</p>
+<diagram name="shift_reg">A serial-in, parallel-out (SIPO) shift register. After four clock edges the last four serial bits are available in parallel on Q0 to Q3.</diagram>
+<wavegen name="shift4">Shifting in the sequence 1, 0, 1, 1, 0, 0, 1, 0. Each bit appears on Q0 after the edge that samples it and moves one stage per clock; Q3 shows the bit that entered four edges earlier.</wavegen>
+<p>Variants are named by how data enters and leaves: serial-in serial-out (a delay line of n cycles), serial-in parallel-out (deserializer, as in a receiver), and parallel-in serial-out (serializer: a mux in front of each flip-flop selects between parallel load and shift). Serial interfaces such as SPI and UARTs are built around shift registers (<ref to="devices"/>).</p>
+<p>A <b>universal shift register</b> puts a 4-to-1 mux in front of each bit, controlled by a 2-bit mode S<sub>1</sub>S<sub>0</sub>. For bit i of an n-bit register:</p>
+<grid cls="mono">S1 S0 | Operation | D_i comes from
+0 0 | hold | Q_i
+0 1 | shift right | Q_(i+1); the top bit takes the serial input DSR
+1 0 | shift left | Q_(i−1); bit 0 takes the serial input DSL
+1 1 | parallel load | input bit IN_i</grid>
+<p>Shifting left by one position multiplies an unsigned value by 2; shifting right divides by 2 (arithmetic right shift, which copies the sign bit into the top position, does the same for two's complement values).</p>
+
+<h3>Linear-feedback shift registers</h3>
+<p>Feed the XOR of a few chosen bits (the <b>taps</b>) back into the input of a shift register, and it steps through a long, scrambled-looking sequence of states. With the right taps, an n-bit <b>LFSR</b> visits all 2ⁿ − 1 nonzero states before repeating, a <b>maximal-length</b> sequence. The all-zeros state is excluded because it maps to itself (XOR of zeros is zero), so an LFSR must be seeded with a nonzero value.</p>
+<diagram name="lfsr">A 4-bit maximal LFSR. Each edge shifts s0 → s1 → s2 → s3 and loads s0 with s3 ⊕ s2.</diagram>
+<p>Starting from s<sub>3</sub>s<sub>2</sub>s<sub>1</sub>s<sub>0</sub> = 1000, it produces 0001, 0010, 0100, 1001, 0011, 0110, 1101, 1010, 0101, 1011, 0111, 1111, 1110, 1100, and returns to 1000 after 15 steps. The taps correspond to a primitive polynomial over GF(2), here x⁴ + x³ + 1; tables of such polynomials exist for every width. LFSRs cost one flip-flop per bit plus a few XOR gates and are used as pseudo-random sequence generators in built-in self-test, as scramblers in serial links, and in the closely related form of CRC (cyclic redundancy check) circuits, which divide a message by a polynomial to compute a checksum.</p>
+
+<h3>Synchronous counters</h3>
+<p>A <b>counter</b> is a register whose next value is computed from its current value. The general-purpose design is a register, an incrementer and a few muxes that implement priority among control inputs: a synchronous reset (RST), a parallel load (LD) and a count enable (CE).</p>
+<diagram name="sync_counter">A loadable counter with enable. All bits are clocked together, so every output changes one clock-to-Q delay after the edge.</diagram>
+<wavegen name="counter_wave">The counter starts at 13, increments on each edge while CE = 1 (wrapping from 15 to 0), holds while CE = 0, and loads 9 when LD = 1.</wavegen>
+<p>Looking at one bit at a time gives a compact gate-level form. In binary counting, bit i toggles exactly when all lower bits are 1 (that is when the carry reaches it), so with T flip-flops or the equivalent XOR in front of D flip-flops:</p>
+<eq c>T<sub>0</sub> = EN,   T<sub>1</sub> = EN·Q<sub>0</sub>,   T<sub>2</sub> = EN·Q<sub>0</sub>·Q<sub>1</sub>,   T<sub>i</sub> = EN·Q<sub>0</sub>·Q<sub>1</sub>···Q<sub>i−1</sub></eq>
+<p>The AND chain is the incrementer's carry chain, and for wide counters it is computed with lookahead, exactly as in an adder (<ref to="arith"/>). The AND of all bits and EN is the <b>terminal count</b> (TC) or ripple-carry-out signal, which can enable the next counter in a cascade.</p>
+<ul>
+<li><b>Modulo-N counters</b> count 0 to N − 1 and wrap. Detect the last state and force a synchronous reset: a decade (mod-10) counter clears when it reaches 9 and is enabled. Only the bits that are 1 in N − 1 need checking, if the states above N − 1 can never occur.</li>
+<li><b>Up/down counters</b> add +1 or −1 (all ones) according to a direction input.</li>
+<li><b>Down counters with load</b> are the heart of programmable timers: load a value, count down, and signal when zero is reached. Microcontroller timers are exactly this, with a programmable clock prescaler in front (<ref to="interrupts"/>).</li>
+</ul>
+
+<h3>Ripple counters</h3>
+<p>A counter can also be built without an incrementer: chain toggle flip-flops so that each stage is clocked by the previous stage's output. Stage i toggles when stage i − 1 falls from 1 to 0, which is exactly binary counting.</p>
+<diagram name="ripple_counter">A ripple counter. It needs no logic at all, which made it popular in early integrated circuits and makes it still useful for simple frequency division.</diagram>
+<wavegen name="ripple_wave">The cost: each stage switches one clock-to-Q delay after the previous one, so the count passes through wrong intermediate values (here 011 → 010 → 000 → 100) and settles only after n delays.</wavegen>
+<p>Because each flip-flop has a different clock, the outputs are not synchronous with each other or with anything else in the design, and logic that decodes them sees glitches. Synchronous design, in which every flip-flop shares one clock, avoids this whole class of problems and is assumed by every timing tool; ripple counters are confined to frequency dividers whose outputs are used only as clocks or only after settling.</p>
+
+<h3>Ring, Johnson and Gray counters</h3>
+<p>Other state sequences trade flip-flops for simpler decoding:</p>
+<ul>
+<li>A <b>ring counter</b> is a shift register whose output feeds its input, initialized with a single 1 (one-hot). With n flip-flops it cycles through n states, and each state is decoded by a single flip-flop output, with no logic at all.</li>
+<li>A <b>Johnson counter</b> (twisted ring) feeds back the <i>inverted</i> last bit. With n flip-flops it cycles through 2n states, for example 000, 001, 011, 111, 110, 100 for n = 3, and every state is decoded by one 2-input gate looking at the boundary between the 1s and 0s. Only one bit changes per step, so decoding is glitch-free.</li>
+<li>A <b>Gray-code counter</b> also changes exactly one bit per step but uses all 2ⁿ codes. It can be built as a binary counter whose output is converted with G = B ⊕ (B &gt;&gt; 1). Gray counters are essential for pointers that cross between clock domains (<ref to="timing"/>).</li>
+</ul>
+
+<h3>Frequency division</h3>
+<p>Bit i of a binary counter driven by clock f toggles at f/2<sup>i+1</sup>, a square wave with 50% duty cycle. Division by an arbitrary N uses a modulo-N counter: its terminal-count output is a one-cycle pulse at f/N, which is usually what a synchronous design wants (an enable for slower logic, rather than a new clock). A 50% duty cycle at f/N for even N comes from toggling a flip-flop every N/2 input cycles; for odd N it needs both clock edges, for example ORing a signal with a copy of itself delayed by half a cycle through a falling-edge flip-flop.</p>
+<key><p>In synchronous design, slow events are created with <b>enables</b>, not with new clocks. A counter that produces a one-cycle "tick" every millisecond lets every flip-flop in the design stay on the main clock, so timing analysis remains a single, well-defined problem.</p></key>
+
+<h3>Summary</h3>
+<ul>
+<li>A register is n flip-flops on one clock; a load enable is a feedback mux on D, never a gate on the clock. Clock gating for power uses latch-based ICG cells.</li>
+<li>Shift registers move data one position per edge (SIPO, PISO, SISO, universal with a 4-to-1 mux per bit).</li>
+<li>An n-bit maximal LFSR cycles through 2ⁿ − 1 nonzero states; the all-zero state locks up.</li>
+<li>Synchronous counter: register + incrementer + priority muxes (RST &gt; LD &gt; CE); T<sub>i</sub> = EN·Q<sub>0</sub>···Q<sub>i−1</sub>.</li>
+<li>Ripple counters chain clocks and produce transient wrong values; avoid them except as dividers.</li>
+<li>Ring: n states from n flip-flops; Johnson: 2n states; Gray: one bit changes per count.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>How many flip-flops are needed for a counter that counts 0 to 9? For one that counts 0 to 999?</p></ask>
+<sol><p>10 states need ⌈log₂ 10⌉ = <b>4</b>. 1000 states need ⌈log₂ 1000⌉ = <b>10</b> (as a binary counter; three cascaded decade counters in BCD would use 12).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How many distinct states does a 4-bit ring counter cycle through? A 4-bit Johnson counter? A 4-bit binary counter?</p></ask>
+<sol><p>Ring: <b>4</b>. Johnson: <b>8</b>. Binary: <b>16</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 4-bit SIPO shift register (serial input into Q0, shifting toward Q3) starts at Q3Q2Q1Q0 = 0000. What does it hold after shifting in 1, 0, 1, 1 (in that order)?</p></ask>
+<sol><p>0001 → 0010 → 0101 → <b>1011</b>. The first bit in has reached Q3.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write the toggle conditions T<sub>0</sub> to T<sub>3</sub> for a 4-bit synchronous up counter with enable EN, and the terminal-count signal.</p></ask>
+<sol><p>T<sub>0</sub> = EN, T<sub>1</sub> = EN·Q<sub>0</sub>, T<sub>2</sub> = EN·Q<sub>0</sub>Q<sub>1</sub>, T<sub>3</sub> = EN·Q<sub>0</sub>Q<sub>1</sub>Q<sub>2</sub>. <b>TC = EN·Q<sub>0</sub>Q<sub>1</sub>Q<sub>2</sub>Q<sub>3</sub></b>, which is 1 in the cycle before the counter wraps from 15 to 0.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why is <code>assign gclk = clk &amp; en;</code> a poor way to implement a register enable? Give two reasons.</p></ask>
+<sol><p>(1) If <code>en</code> changes while <code>clk</code> is high, <code>gclk</code> gets a truncated pulse or an extra edge, which may or may not clock the register (a glitch on a clock). (2) The AND gate delays the register's clock relative to the rest of the design, creating skew that can cause hold or setup violations. Use an enable mux on D, or an integrated clock-gating cell if the goal is power.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Design the clear condition for a synchronous modulo-6 counter (0 to 5) built from a 3-bit counter with enable EN. Why is a 2-input AND gate enough to detect the last state?</p></ask>
+<sol><p>The counter must go from 5 (101) to 0 instead of 6: clear when <b>EN·Q<sub>2</sub>·Q<sub>0</sub></b>. Among the reachable states 0 to 5, only 101 has Q<sub>2</sub> = Q<sub>0</sub> = 1 (111 would also match, but it is never reached), so Q<sub>1</sub> need not be checked. A robust design also clears from the unreachable states 6 and 7 in case a glitch or power-up ever lands there.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>For a 4-bit universal shift register, write the four mux inputs feeding bit 0 and bit 3, for modes hold, shift right, shift left and load.</p></ask>
+<sol><p>Bit 0: hold Q<sub>0</sub>; shift right Q<sub>1</sub>; shift left <b>DSL</b>; load IN<sub>0</sub>. Bit 3: hold Q<sub>3</sub>; shift right <b>DSR</b>; shift left Q<sub>2</sub>; load IN<sub>3</sub>. The serial inputs appear only at the end that data enters from.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The LFSR in the text is seeded with 0001 (s<sub>3</sub>s<sub>2</sub>s<sub>1</sub>s<sub>0</sub>). List the next five states. What happens if it is ever loaded with 0000?</p></ask>
+<sol><p>New s0 = s3 ⊕ s2, then shift: 0001 → <b>0010 → 0100 → 1001 → 0011 → 0110</b>. From 0000 the feedback is 0 ⊕ 0 = 0, so it stays at 0000 forever; real designs either guarantee a nonzero seed or add logic to escape the all-zero state.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 3-bit Johnson counter shifts left (Q<sub>0</sub> → Q<sub>1</sub> → Q<sub>2</sub>) and loads Q<sub>0</sub> with Q<sub>2</sub>′. List its states from 000. Which 2-input gate decodes state 011 (Q<sub>2</sub>Q<sub>1</sub>Q<sub>0</sub>)?</p></ask>
+<sol><p>000 → 001 → 011 → 111 → 110 → 100 → 000. State 011 is the only one with Q<sub>2</sub> = 0 and Q<sub>1</sub> = 1 (the boundary between 0s and 1s), so it is decoded by <b>Q<sub>2</sub>′·Q<sub>1</sub></b>. Every Johnson state is decoded by one such 2-input AND of adjacent bits.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A system clock is 16 MHz. You need a one-cycle tick every 1 ms to enable slower logic. What modulus and how many bits does the counter need?</p></ask>
+<sol><p>1 ms × 16 MHz = 16,000 cycles: a <b>modulo-16,000</b> counter (count 0 to 15,999, tick on 15,999). 2¹⁴ = 16,384 ≥ 16,000, so <b>14 bits</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A block of 2,048 flip-flops consumes 3 fJ per flip-flop per clock edge including its share of the clock tree, at 1 GHz. The block is idle 75% of the time. How much power does clock gating save?</p></ask>
+<sol><p>Ungated: 2048 × 3 fJ × 10⁹ /s = <b>6.1 mW</b>. Gated during the idle 75%: savings ≈ 0.75 × 6.1 = <b>4.6 mW</b> (minus a little for the ICG cells), leaving about 1.5 mW.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A 3-bit ripple counter is decoded by an AND gate for the value 4 (Q<sub>2</sub>·Q<sub>1</sub>′·Q<sub>0</sub>′). Show that the decoder output pulses briefly when the counter goes from 7 to 0, and explain why this is harmful.</p></ask>
+<sol><p>From 111, Q<sub>0</sub> falls first (110), then Q<sub>1</sub> falls (100), then Q<sub>2</sub> falls (000). For one stage delay the outputs read <b>100 = 4</b>, so the decoder emits a glitch that has nothing to do with the real count. If that signal drives a clock, an asynchronous reset or anything outside a synchronous sampling point, the glitch acts as a real event. A synchronous counter sampled by flip-flops on the same clock never exposes these states.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a divide-by-3 clock with a 50% duty cycle from a clock CLK.</p></ask>
+<hint><p>A mod-3 counter on rising edges gives a signal that is high for one cycle out of three. How can you stretch it by half a cycle?</p></hint>
+<sol><p>Build a mod-3 counter on rising edges and decode one state, giving Y high for 1 of every 3 cycles. Sample Y with a <b>falling-edge</b> flip-flop to get Y<sub>n</sub>, the same pulse delayed by half a cycle. Then <b>OUT = Y + Y<sub>n</sub></b> is high for 1.5 cycles out of 3: a 50% duty cycle at f/3. Because the result combines both clock edges, it depends on the input clock's own duty cycle, and the OR output should be treated carefully as a clock (glitch-free by construction here, since Y and Y<sub>n</sub> overlap).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Give the logic that converts a 4-bit binary count B to Gray code G, and the inverse conversion. Why does a counter that crosses clock domains use Gray code?</p></ask>
+<sol><p>Binary to Gray: <b>G<sub>3</sub> = B<sub>3</sub>, G<sub>i</sub> = B<sub>i+1</sub> ⊕ B<sub>i</sub></b>, i.e. G = B ⊕ (B &gt;&gt; 1). Gray to binary: <b>B<sub>3</sub> = G<sub>3</sub>, B<sub>i</sub> = B<sub>i+1</sub> ⊕ G<sub>i</sub></b> (a prefix XOR from the top bit down). When a multi-bit value is sampled asynchronously while it changes, each bit may be caught old or new. With binary counting, 0111 → 1000 changes four bits and could be read as any of 16 values; with Gray code only one bit changes, so the sampled value is either the old count or the new one, never something else.</p></sol>
+</prob>
+</practice>
+</module>

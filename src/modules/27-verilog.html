@@ -1,0 +1,349 @@
+<module id="verilog" num="27" part="7" title="Describing hardware in Verilog" short="Verilog" pre="fsm,timing" blurb="Hardware description at the register-transfer level: modules, vectors and operators, combinational logic without accidental latches, clocked logic with nonblocking assignments, state machines, hierarchy and generate, self-checking testbenches, and how code becomes gates.">
+
+<p>Real digital designs are not drawn as schematics; they are written in a <b>hardware description language</b> (HDL). Verilog, its extension SystemVerilog, and VHDL let a designer describe circuits at the <b>register-transfer level</b> (RTL): registers, and the combinational logic that computes their next values. A simulator executes the description to check its behavior, and a synthesis tool turns it into gates. The essential mindset is that HDL code describes hardware that all exists and operates at once; it is not a sequential program, even when it looks like one.</p>
+
+<h3>Modules, signals and values</h3>
+<p>The unit of design is the <b>module</b>, a block with named ports. Signals are single bits or vectors; <code>[7:0]</code> declares eight bits with bit 7 the most significant. Literals give a width, a base and a value: <code>8'hA5</code>, <code>4'b1010</code>, <code>6'd42</code>. Each bit can be 0, 1, x (unknown, as at power-up in simulation) or z (high impedance).</p>
+<pre lang="v">module mux2 #(parameter W = 8) (
+    input  wire [W-1:0] a,
+    input  wire [W-1:0] b,
+    input  wire         sel,
+    output wire [W-1:0] y
+);
+    assign y = sel ? b : a;      // continuous assignment: always equal to this expression
+endmodule</pre>
+<p>A <code>wire</code> is a connection driven continuously by an <code>assign</code> or a module output. A <code>reg</code> is a variable assigned inside an <code>always</code> block; despite the name, it becomes a register only if the block describes one. (SystemVerilog replaces both with <code>logic</code> for most uses.) <code>parameter</code> makes a module generic, here in its width.</p>
+<grid>Operator | Meaning | Example (a = 4'b1100, b = 4'b1010)
+&amp; \| ^ ~ | bitwise AND, OR, XOR, NOT | a &amp; b = 4'b1000
+&amp;a, \|a, ^a | reduction: AND, OR, XOR of all bits of one vector | ^a = 0 (even number of 1s)
+&amp;&amp; \|\| ! | logical, result 1 bit | a &amp;&amp; b = 1
+{a, b} | concatenation | 8'b1100_1010
+{3{2'b10}} | replication | 6'b101010
+&lt;&lt; &gt;&gt; &gt;&gt;&gt; | shifts (&gt;&gt;&gt; is arithmetic on signed values) | a &gt;&gt; 2 = 4'b0011
+? : | conditional (a multiplexer) | sel ? b : a
++ − * == != &lt; &gt; | arithmetic and comparison | a + b = 4'b0110 in 4 bits</grid>
+<p>Expression width follows the widest operand and the destination: <code>8'd200 + 8'd100</code> assigned to an 8-bit signal gives 44, but assigned to a 9-bit signal gives 300, because the addition is then carried out at 9 bits.</p>
+
+<h3>Combinational logic</h3>
+<p>Combinational logic is written either with <code>assign</code> statements or with an <code>always @*</code> block (SystemVerilog: <code>always_comb</code>), which re-evaluates whenever any input it reads changes. Inside it, use <b>blocking</b> assignments (<code>=</code>), which take effect immediately, like ordinary variable assignments.</p>
+<pre lang="v">module dec2to4 (
+    input  wire [1:0] a,
+    input  wire       en,
+    output reg  [3:0] y
+);
+    always @* begin
+        y = 4'b0000;          // default first: every path through the block assigns y
+        if (en)
+            y[a] = 1'b1;      // one-hot output selected by a
+    end
+endmodule
+
+// A priority encoder: the first matching pattern wins
+always @* begin
+    casez (req)               // ? matches either value
+        4'b1???: grant = 2'd3;
+        4'b01??: grant = 2'd2;
+        4'b001?: grant = 2'd1;
+        default: grant = 2'd0;
+    endcase
+end</pre>
+<warn>
+<p>If some path through a combinational block does not assign an output, the output must keep its old value on that path, and the only hardware that can do that is a <b>latch</b>. Synthesis infers one, usually unintentionally:</p>
+<pre lang="v">always @* begin
+    if (en)
+        q = d;                //! no else: q holds when en = 0, so a latch is inferred
+end</pre>
+<p>Avoid inferred latches by assigning a default value at the top of the block, covering every branch of every if and case (with a <code>default</code>), or by using <code>always_comb</code>, whose tools warn about them.</p>
+</warn>
+<p>The structure of the code shapes the hardware. A chain of <code>if</code> / <code>else if</code> becomes a priority chain of multiplexers, with the first condition closest to the output; a <code>case</code> on one selector whose items are mutually exclusive becomes a single parallel multiplexer. Both are correct; they differ in delay and size.</p>
+
+<h3>Sequential logic</h3>
+<p>Registers are written as blocks triggered by a clock edge, using <b>nonblocking</b> assignments (<code>&lt;=</code>). A nonblocking assignment evaluates its right-hand side immediately but updates the left-hand side only after every block triggered by the same edge has evaluated, which is exactly how a set of flip-flops behaves: all sample their inputs at the edge, then all outputs change together.</p>
+<pre lang="v">module counter #(parameter W = 4) (
+    input  wire         clk,
+    input  wire         rst,      // synchronous, active high
+    input  wire         en,
+    output reg  [W-1:0] count
+);
+    always @(posedge clk) begin
+        if (rst)
+            count <= {W{1'b0}};
+        else if (en)
+            count <= count + 1'b1;
+    end
+endmodule
+
+// Asynchronous, active-low reset: the reset appears in the sensitivity list
+always @(posedge clk or negedge rst_n)
+    if (!rst_n) q <= 1'b0;
+    else        q <= d;</pre>
+<diagram name="rtl_map">What the counter's always block becomes: a register, an incrementer, and multiplexers that implement the if/else priority.</diagram>
+
+<h3>Blocking versus nonblocking</h3>
+<p>The two assignment types give different hardware in a clocked block:</p>
+<pre lang="v">always @(posedge clk) begin   // two-stage shift register, as intended
+    b <= a;
+    c <= b;                   // uses the old b
+end
+
+always @(posedge clk) begin   // not a shift register
+    b = a;
+    c = b;                    //! uses the new b, which is already a
+end</pre>
+<diagram name="blocking_nb">The blocking version makes c a copy of a, captured at the same edge as b.</diagram>
+<key><p>Three rules avoid nearly all simulation-synthesis mismatches: use nonblocking (<code>&lt;=</code>) in clocked blocks; use blocking (<code>=</code>) in combinational blocks; and assign each signal from only one always block. Two blocks driving the same signal describe two circuits fighting over one wire, which synthesis rejects and simulation resolves arbitrarily.</p></key>
+
+<h3>State machines in Verilog</h3>
+<p>The FSM template of <ref to="fsm"/> maps directly onto code: a clocked block for the state register, a combinational block for the next-state logic, and assignments for the outputs.</p>
+<pre lang="v">module det101 (                         // Moore detector for 101, overlapping
+    input  wire clk,
+    input  wire rst,
+    input  wire x,
+    output wire found
+);
+    localparam S0 = 2'd0, S1 = 2'd1, S2 = 2'd2, S3 = 2'd3;
+    reg [1:0] state, next;
+
+    always @(posedge clk)                // state register
+        if (rst) state <= S0;
+        else     state <= next;
+
+    always @* begin                      // next-state logic
+        case (state)
+            S0:      next = x ? S1 : S0;
+            S1:      next = x ? S1 : S2;
+            S2:      next = x ? S3 : S0;
+            S3:      next = x ? S1 : S2;
+            default: next = S0;
+        endcase
+    end
+
+    assign found = (state == S3);        // Moore output: a function of the state
+endmodule</pre>
+<p>The state encoding is chosen by the localparam values here; synthesis tools can also re-encode FSMs automatically (often to one-hot on FPGAs). SystemVerilog's <code>typedef enum</code> gives states readable names in simulation waveforms.</p>
+
+<h3>Hierarchy and generate</h3>
+<p>Larger designs instantiate modules inside other modules, connecting ports by name. A <code>generate</code> loop instantiates repeated structure, such as a ripple-carry adder built from full adders:</p>
+<pre lang="v">module full_adder (input wire a, b, cin, output wire s, cout);
+    assign s    = a ^ b ^ cin;
+    assign cout = (a & b) | (cin & (a ^ b));
+endmodule
+
+module ripple4 (
+    input  wire [3:0] a, b,
+    input  wire       cin,
+    output wire [3:0] s,
+    output wire       cout
+);
+    wire [4:0] c;
+    assign c[0] = cin;
+    genvar i;
+    generate
+        for (i = 0; i < 4; i = i + 1) begin : stage
+            full_adder fa (.a(a[i]), .b(b[i]), .cin(c[i]), .s(s[i]), .cout(c[i+1]));
+        end
+    endgenerate
+    assign cout = c[4];
+endmodule</pre>
+<p>In practice one would write <code>assign {cout, s} = a + b + cin;</code> and let synthesis choose an adder architecture (ripple, carry-lookahead, prefix) that meets the timing constraint, which is one of the main benefits of RTL design.</p>
+
+<h3>Testbenches</h3>
+<p>A testbench is a module with no ports that instantiates the design under test (DUT), generates its clock and inputs, and checks its outputs. Testbenches may use constructs that have no hardware meaning: <code>initial</code> blocks, delays (<code>#5</code>), random numbers, <code>$display</code>. A good testbench is <b>self-checking</b>: it computes the expected result with a simple reference model and reports mismatches, instead of relying on someone to read waveforms.</p>
+<pre lang="v">`timescale 1ns/1ps
+module tb_counter;
+    reg        clk = 1'b0, rst = 1'b1, en = 1'b0;
+    wire [3:0] count;
+    reg  [3:0] expected;
+    integer    errors = 0, k;
+
+    counter #(.W(4)) dut (.clk(clk), .rst(rst), .en(en), .count(count));
+
+    always #5 clk = ~clk;                       // 10 ns period
+
+    initial begin
+        expected = 4'd0;
+        @(negedge clk);                         // change inputs away from the active edge
+        @(negedge clk) rst = 1'b0;
+        for (k = 0; k < 40; k = k + 1) begin
+            en = $random;                       // random 0 or 1
+            @(posedge clk);                     // the DUT updates at this edge
+            if (en) expected = expected + 1'b1; // reference model
+            #1;
+            if (count !== expected) begin
+                errors = errors + 1;
+                $display("t=%0t count=%0d expected=%0d", $time, count, expected);
+            end
+            @(negedge clk);
+        end
+        $display("%0d errors", errors);
+        $finish;
+    end
+endmodule</pre>
+<p>Driving inputs on the falling edge (or with nonblocking assignments) avoids a classic race in which the testbench and the DUT both react to the same rising edge and the result depends on the simulator's arbitrary ordering. Industrial verification adds constrained-random stimulus, functional coverage, assertions (SystemVerilog Assertions) and methodologies such as UVM, and verification typically takes more engineering effort than design.</p>
+
+<h3>From code to gates</h3>
+<p>A synthesis tool reads RTL plus <b>constraints</b> (clock periods, input and output delays) and a library of standard cells, infers registers from clocked blocks and logic from everything else, optimizes, and produces a gate-level netlist that meets timing (<ref to="timing"/>). Not everything that simulates can be synthesized: delays are ignored, <code>initial</code> blocks are ignored in ASIC flows (FPGA tools can use them for power-up values), loops must have constant bounds and are unrolled into hardware, and system tasks such as <code>$display</code> exist only in simulation. Writing code whose simulated behavior matches the synthesized hardware is the core skill of RTL design.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Modules with ports; wires for continuous assignments, regs for always-block variables; vectors, sized literals, reduction, concatenation and replication operators.</li>
+<li>Combinational: <code>assign</code> or <code>always @*</code> with blocking assignments; assign every output on every path to avoid latches.</li>
+<li>Sequential: <code>always @(posedge clk)</code> with nonblocking assignments; resets synchronous (inside the block) or asynchronous (in the sensitivity list).</li>
+<li>One driver per signal; <code>&lt;=</code> in clocked blocks, <code>=</code> in combinational blocks.</li>
+<li>FSM = state register block + next-state block + output assignments.</li>
+<li>Self-checking testbenches compare the DUT with a reference model; drive inputs away from the active clock edge.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>With a = 4'b1010 and b = 2'b11, what are <code>{a, b}</code>, <code>{2{b}}</code>, <code>&amp;a</code> and <code>^a</code>?</p></ask>
+<sol><p><code>{a, b}</code> = <b>6'b101011</b>; <code>{2{b}}</code> = <b>4'b1111</b>; <code>&amp;a</code> = <b>0</b> (not all ones); <code>^a</code> = <b>0</b> (two ones, even parity).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Which assignment operator belongs in a clocked always block, and which in a combinational one?</p></ask>
+<sol><p>Clocked: <b>nonblocking</b> (<code>&lt;=</code>). Combinational: <b>blocking</b> (<code>=</code>).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write a 4-to-1 multiplexer for 8-bit inputs d0–d3 and a 2-bit select using an <code>always @*</code> block and a case statement.</p></ask>
+<sol><pre lang="v">module mux4 (
+    input  wire [7:0] d0, d1, d2, d3,
+    input  wire [1:0] sel,
+    output reg  [7:0] y
+);
+    always @* begin
+        case (sel)
+            2'd0:    y = d0;
+            2'd1:    y = d1;
+            2'd2:    y = d2;
+            default: y = d3;
+        endcase
+    end
+endmodule</pre><p>The <code>default</code> covers every remaining selector value, so y is assigned on every path and no latch is inferred.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Does this block infer a latch? Fix it.</p>
+<pre lang="v">always @* begin
+    case (op)
+        2'b00: y = a + b;
+        2'b01: y = a - b;
+        2'b10: y = a & b;
+    endcase
+end</pre></ask>
+<sol><p><b>Yes</b>: for op = 2'b11, y is not assigned and must hold its old value, so a latch is inferred. Add <code>default: y = a | b;</code> (or whatever op 11 should do), or put <code>y = 0;</code> before the case.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What value does each produce? (a) <code>wire [7:0] s = 8'd200 + 8'd100;</code> (b) <code>wire [8:0] t = 8'd200 + 8'd100;</code></p></ask>
+<sol><p>(a) The expression is evaluated at 8 bits: 300 − 256 = <b>44</b>. (b) The destination is 9 bits, so the addition is carried out at 9 bits: <b>300</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write a parameterized register with load enable and an asynchronous active-low reset.</p></ask>
+<sol><pre lang="v">module regen #(parameter W = 8) (
+    input  wire         clk,
+    input  wire         rst_n,
+    input  wire         en,
+    input  wire [W-1:0] d,
+    output reg  [W-1:0] q
+);
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)  q <= {W{1'b0}};
+        else if (en) q <= d;          // no else: holding is what a register does
+    end
+endmodule</pre><p>Omitting the else in a <i>clocked</i> block is fine: the flip-flops simply keep their value, implemented with an enable or a feedback mux. Only in combinational blocks does a missing assignment create a latch.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write a module that outputs a one-cycle pulse when a synchronous input x rises.</p></ask>
+<sol><pre lang="v">module rise_detect (
+    input  wire clk,
+    input  wire rst,
+    input  wire x,
+    output wire pulse
+);
+    reg x_d;                          // x delayed by one cycle
+    always @(posedge clk)
+        if (rst) x_d <= 1'b0;
+        else     x_d <= x;
+    assign pulse = x & ~x_d;          // now 1, previously 0
+endmodule</pre><p>If x is asynchronous, pass it through a two-flip-flop synchronizer first and detect edges on the synchronized signal.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write a two-flip-flop synchronizer module, and explain why it must be written with nonblocking assignments.</p></ask>
+<sol><pre lang="v">module sync2 (
+    input  wire clk,
+    input  wire async_in,
+    output reg  sync_out
+);
+    reg meta;
+    always @(posedge clk) begin
+        meta     <= async_in;
+        sync_out <= meta;             // the old value of meta
+    end
+endmodule</pre><p>With blocking assignments, <code>sync_out = meta</code> would read the value just assigned, collapsing the two stages into one and removing the resolution time the second flip-flop provides.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A designer writes two always blocks: one sets <code>busy &lt;= 1</code> on start, the other clears <code>busy &lt;= 0</code> on done. What is wrong, and how should it be written?</p></ask>
+<sol><p>Two blocks drive the same register: in hardware that is two flip-flops (or drivers) fighting over one signal. Synthesis reports multiple drivers, and simulation produces whichever block ran last. Write one block that decides: <code>always @(posedge clk) if (rst) busy &lt;= 0; else if (start) busy &lt;= 1; else if (done) busy &lt;= 0;</code>, with the priority stated explicitly.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Describe the hardware produced by each, and when each is preferable:</p>
+<pre lang="v">// version A
+always @* if (s[0]) y = a; else if (s[1]) y = b; else if (s[2]) y = c; else y = d;
+// version B
+always @* case (s) 3'b001: y = a; 3'b010: y = b; 3'b100: y = c; default: y = d; endcase</pre></ask>
+<sol><p>A is a <b>priority chain</b> of three 2-to-1 muxes: s[0] wins over s[1], which wins over s[2]; the delay grows with the chain length, and it behaves sensibly even if several bits of s are 1. B is a <b>parallel</b> one-hot select (a 4-to-1 mux with decoded selects), shallower and faster, but it only matches its intent when s is guaranteed one-hot (other values fall to d). Use A when priority is part of the specification, B when the selects are mutually exclusive.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Write a synchronous FIFO with parameterized width and a depth of 8, with push, pop, full and empty. Explain how the pointers distinguish full from empty.</p></ask>
+<sol><pre lang="v">module fifo8 #(parameter W = 8) (
+    input  wire         clk, rst,
+    input  wire         push, pop,
+    input  wire [W-1:0] din,
+    output wire [W-1:0] dout,
+    output wire         full, empty
+);
+    reg [W-1:0] mem [0:7];
+    reg [3:0]   wp, rp;                       // one extra bit beyond the 3 address bits
+
+    assign empty = (wp == rp);
+    assign full  = (wp[2:0] == rp[2:0]) && (wp[3] != rp[3]);
+    assign dout  = mem[rp[2:0]];
+
+    always @(posedge clk) begin
+        if (rst) begin
+            wp <= 4'd0;
+            rp <= 4'd0;
+        end else begin
+            if (push && !full) begin
+                mem[wp[2:0]] <= din;
+                wp <= wp + 1'b1;
+            end
+            if (pop && !empty)
+                rp <= rp + 1'b1;
+        end
+    end
+endmodule</pre><p>With 3-bit pointers, equal pointers would mean both empty and full. The fourth bit counts laps: equal including the lap bit means empty; equal addresses with different lap bits means the writer is exactly one lap ahead, so the FIFO is full. (This version presents the head entry combinationally on dout; pushing and popping in the same cycle works when the FIFO is neither empty nor full.)</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Write a binary counter that also outputs its value in Gray code, and say why the Gray output should come from a register if it crosses clock domains.</p></ask>
+<sol><pre lang="v">module gray_counter #(parameter W = 4) (
+    input  wire         clk, rst, en,
+    output reg  [W-1:0] bin,
+    output reg  [W-1:0] gray
+);
+    wire [W-1:0] bin_next = bin + (en ? 1'b1 : 1'b0);
+    always @(posedge clk) begin
+        if (rst) begin
+            bin  <= {W{1'b0}};
+            gray <= {W{1'b0}};
+        end else begin
+            bin  <= bin_next;
+            gray <= bin_next ^ (bin_next >> 1);   // registered Gray code
+        end
+    end
+endmodule</pre><p>A Gray code computed combinationally from bin can glitch while the XOR gates settle (several bits of bin change at once), and a synchronizer in another domain could sample a glitch. Registering it guarantees that each change is a single clean bit transition at a clock edge.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>In a testbench, the stimulus is applied with <code>@(posedge clk) en = 1;</code> while the DUT samples <code>en</code> in <code>always @(posedge clk)</code>. Why can the DUT see either the old or the new value, and how is this fixed?</p></ask>
+<sol><p>Both the testbench process and the DUT's always block wake up at the same rising edge, and the simulator may run either first. If the testbench's blocking assignment runs first, the DUT sees the new en at that edge; otherwise it sees the old one. This is a race. Fix it by changing stimulus away from the active edge (at the falling edge or after a small delay), or by using nonblocking assignments for stimulus (<code>en &lt;= 1;</code>), so the update happens after all blocks triggered by the edge have sampled their inputs.</p></sol>
+</prob>
+</practice>
+</module>

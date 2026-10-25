@@ -1,0 +1,148 @@
+<module id="perf" num="19" part="5" title="Performance and pipelining" short="Performance and pipelining" pre="datapath,timing" blurb="How performance is measured and improved: latency and throughput, the processor performance equation, Amdahl's law, pipelining and its limits, data and control hazards with forwarding and branch prediction, and how superscalar out-of-order processors go further.">
+
+<p>Making hardware faster means either finishing each task sooner or finishing more tasks per unit time. The two are different, they are improved by different techniques, and confusing them is one of the most common mistakes in performance reasoning. This module builds the quantitative tools first and then applies them to the most important performance technique in hardware: pipelining.</p>
+
+<h3>Latency and throughput</h3>
+<def term="Latency">The time from the start of one task to its completion, for example the time to execute one instruction or to fetch one cache line.</def>
+<def term="Throughput">The number of tasks completed per unit time, for example instructions per second or bytes per second.</def>
+<p>A fighter jet carries one person at 2,400 km/h; a large airliner carries 400 people at 900 km/h. The jet has lower latency for a single traveler; the airliner moves 360,000 person-kilometers per hour against the jet's 2,400, so it has 150 times the throughput. Caches primarily reduce latency (<ref to="caches"/>); pipelining and parallelism primarily raise throughput, and can even increase the latency of each individual task.</p>
+
+<h3>The processor performance equation</h3>
+<p>The time a program takes on a processor factors into three terms:</p>
+<eq c>execution time = instruction count × CPI × clock period = IC × CPI / f</eq>
+<p>CPI is the average number of clock cycles per instruction. Each factor is controlled by different decisions: the instruction count by the ISA and compiler, CPI by the microarchitecture (pipelining, caches, branch prediction) and the instruction mix, and the clock period by the circuit design and process technology (<ref to="timing"/>). The factors interact, which is why a single number such as clock frequency, or instructions per second without regard to what the instructions do, is a poor measure of performance. A deeper pipeline raises f but usually raises CPI too; a richer ISA lowers the instruction count but may lengthen the cycle.</p>
+<p>Speedup compares two systems running the same work: speedup = time<sub>old</sub>/time<sub>new</sub>.</p>
+
+<h3>Amdahl's law</h3>
+<p>If an improvement speeds up only part of a task, the rest limits the overall gain. If a fraction p of the original time is accelerated by a factor s and the remaining 1 − p is unchanged:</p>
+<eq c>speedup = 1 / ((1 − p) + p/s)        ≤ 1/(1 − p) as s → ∞</eq>
+<p>A program that is 90% parallelizable can never run more than 10 times faster on any number of processors; on 16 processors it reaches 1/(0.1 + 0.9/16) = 6.4. Amdahl's law tells you where to spend design effort: on the part that dominates the remaining time.</p>
+<p><b>Gustafson's law</b> describes the opposite situation, where the problem grows with the machine: if the parallel part scales with N processors while the serial part stays fixed, the scaled speedup is (1 − p) + p·N. Amdahl's law describes <i>strong scaling</i> (fixed problem size), Gustafson's <i>weak scaling</i> (fixed time per processor), and both are needed to reason about GPUs and clusters (<ref to="parallel"/>).</p>
+<tool name="amdahl"/>
+
+<h3>Pipelining</h3>
+<p>Suppose a block of combinational logic takes 10 ns, and we must process a stream of 100 inputs, for example computing C[i] = (A[i] + B[i])/4. Without pipelining, each input must pass all the way through before the next can enter: 100 × 10 ns = 1000 ns. Inserting a register halfway through the logic splits it into two stages of 5 ns each. Now a new input can enter every 5 ns, while the previous input is in the second stage.</p>
+<diagram name="pipeline_stages">Pipelining inserts registers into a long combinational path. Each stage works on a different input at the same time.</diagram>
+<p>With k equal stages of delay T<sub>s</sub>, the first result appears after k·T<sub>s</sub> (the pipeline fills) and then one result emerges every T<sub>s</sub>, so N inputs take (k + N − 1)·T<sub>s</sub>:</p>
+<grid cls="mono">Stages | Stage time | Time for 100 inputs | Speedup
+1 | 10 ns | 1000 ns | 1.0
+2 | 5 ns | (2 + 99) × 5 = 505 ns | 1.98
+4 | 2.5 ns | (4 + 99) × 2.5 = 257.5 ns | 3.88</grid>
+<p>For long streams the speedup approaches k. The latency of each individual input did not improve: it still spends 10 ns in the logic. Three effects limit how far pipelining can go:</p>
+<ul>
+<li><b>Register overhead.</b> Each stage pays t<sub>clk→Q</sub> + t<sub>setup</sub> (plus skew margin). If the logic takes T and the overhead is t<sub>reg</sub>, the stage time is T/k + t<sub>reg</sub>, so throughput can never exceed 1/t<sub>reg</sub> and returns diminish as k grows.</li>
+<li><b>Balance.</b> The clock is set by the slowest stage, so an unbalanced split wastes time in every other stage.</li>
+<li><b>Dependencies.</b> Pipelining helps only if inputs are independent. When one input needs the result of the previous one, it must wait, as the next sections show.</li>
+</ul>
+<p>The registers are essential, not incidental: without them, fast signals for the next input would catch up with slow signals for the current one somewhere inside the logic, mixing two computations (this is exactly the race of <ref to="latches"/>).</p>
+
+<h3>The instruction pipeline</h3>
+<p>A processor applies the same idea to the instruction cycle. The classic RISC pipeline has five stages, matching the steps of <ref to="datapath"/>: instruction fetch (IF), decode and register read (ID), execute (EX), memory access (MEM) and write back (WB). Each stage takes one cycle, and a new instruction can start every cycle, so the ideal CPI is 1 even though each instruction takes five cycles.</p>
+<diagram name="pipe5">Pipeline registers between the stages carry each instruction's values and control signals along with it. The forwarding paths are explained below.</diagram>
+<p>The ideal is broken by <b>hazards</b>, situations in which the next instruction cannot proceed in the next cycle:</p>
+<ul>
+<li><b>Structural hazards:</b> two instructions need the same hardware in the same cycle, for example one memory for both instruction fetch and data access. Separate instruction and data caches remove the most common case.</li>
+<li><b>Data hazards:</b> an instruction needs a result that an earlier instruction has not yet written back.</li>
+<li><b>Control hazards:</b> the processor does not know which instruction to fetch next until a branch is resolved.</li>
+</ul>
+
+<h3>Data hazards and forwarding</h3>
+<p>In <code>add x1, x2, x3</code> followed by <code>sub x4, x1, x5</code>, the sub reads x1 in ID one cycle after the add was there, but the add writes x1 only in WB, three cycles later. Stalling until the write completes would cost several cycles per dependency. But the add's result already exists at the end of its EX stage, sitting in the EX/MEM pipeline register. <b>Forwarding</b> (bypassing) adds multiplexers at the ALU inputs that select a value from the EX/MEM or MEM/WB register instead of the register file whenever a hazard-detection unit sees that an older instruction in flight writes the register being read. With forwarding, back-to-back dependent ALU instructions run without stalls.</p>
+<p>A <b>load</b> is different: its value is not available until the end of MEM, too late to forward to an instruction in EX in the very next cycle. A dependent instruction immediately after a load must stall one cycle (a <b>load-use hazard</b>): the hazard unit holds the PC and the IF/ID register and injects a bubble (a no-op) into EX. Compilers reduce these stalls by scheduling an independent instruction between the load and its use.</p>
+<tool name="pipeline"/>
+
+<h3>Control hazards and branch prediction</h3>
+<p>A conditional branch is resolved (taken or not, and where to) in EX in the simple pipeline, two cycles after it was fetched. Meanwhile the processor has already fetched the next two instructions. If it simply guesses "not taken" and continues sequentially, it wins whenever the branch falls through and must flush the two wrong-path instructions otherwise: a 2-cycle penalty per taken branch. Because about one instruction in five is a branch, and modern pipelines resolve branches 10 to 20 cycles after fetch, this cost would be enormous without <b>branch prediction</b>.</p>
+<ul>
+<li><b>Static prediction</b> uses a fixed rule, such as predicting backward branches (loops) taken and forward branches not taken.</li>
+<li><b>Dynamic prediction</b> learns from history. The basic element is a 2-bit saturating counter per branch (indexed by bits of the branch's address): it predicts taken in its two upper states, and it takes two consecutive mispredictions to change the prediction, so a loop's single exit does not flip the guess for the next run of the loop.</li>
+<li>A <b>branch target buffer</b> caches the target addresses of taken branches so that fetch can redirect in the very next cycle. Modern predictors combine global and local history and achieve accuracies well above 95%.</li>
+</ul>
+<diagram name="bp2bit">The 2-bit saturating counter. A 1-bit predictor (remember the last outcome) mispredicts twice per loop execution: at the exit and again at the start of the next run.</diagram>
+<p>Stalls simply add to the CPI: CPI = 1 + (stall cycles per instruction), summed over every hazard type. For example, if 25% of instructions are loads and 40% of them are followed immediately by a dependent instruction (1 stall), and 15% are branches mispredicted 30% of the time with a 2-cycle penalty, CPI = 1 + 0.25 × 0.4 × 1 + 0.15 × 0.3 × 2 = 1.19.</p>
+
+<h3>Beyond the simple pipeline</h3>
+<p>High-performance processors extract more <b>instruction-level parallelism</b> (ILP) with several techniques built on the same foundations:</p>
+<ul>
+<li><b>Superscalar</b> issue fetches, decodes and executes several instructions per cycle (4 to 8 in current designs), with multiple ALUs and more register file ports, so CPI can fall below 1 (often quoted as IPC, instructions per cycle, above 1).</li>
+<li><b>Out-of-order execution</b> lets later independent instructions run while an earlier one waits for a cache miss. Instructions wait in a scheduling window until their operands are ready. <b>Register renaming</b> maps the architectural registers onto a larger pool of physical registers, eliminating false dependencies (write-after-read and write-after-write) that come only from reusing register names. A <b>reorder buffer</b> retires instructions in program order, so exceptions remain precise and the program cannot observe the reordering.</li>
+<li><b>Speculation</b> executes past predicted branches and discards the results if the prediction was wrong.</li>
+<li><b>Simultaneous multithreading</b> (SMT) lets two or more threads share one core's execution units to fill slots that a single thread leaves idle.</li>
+</ul>
+<p>These techniques cost large amounts of area and power for diminishing gains, because real programs have limited ILP. Combined with the end of voltage scaling (<ref to="cmos"/>), this pushed the industry toward many simpler cores and massively parallel processors such as GPUs (<ref to="parallel"/>).</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Latency is time per task; throughput is tasks per time. Pipelines raise throughput, not latency.</li>
+<li>Time = IC × CPI × T. Speedup = old time/new time.</li>
+<li>Amdahl: speedup = 1/((1 − p) + p/s) ≤ 1/(1 − p). Gustafson (scaled): (1 − p) + pN.</li>
+<li>k-stage pipeline: N items take (k + N − 1)T<sub>s</sub>; stage time T/k + t<sub>reg</sub>; balance matters.</li>
+<li>Hazards: structural, data (forwarding removes most; load-use costs a stall), control (prediction; 2-bit counters, BTB).</li>
+<li>CPI = 1 + Σ(frequency × penalty) over stall sources. Superscalar, out-of-order execution, renaming and speculation go beyond CPI = 1 at a high cost in power.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>A program executes 2 × 10⁹ instructions with an average CPI of 1.5 on a 3 GHz processor. How long does it take?</p></ask>
+<sol><p>2 × 10⁹ × 1.5 / (3 × 10⁹) = <b>1.0 s</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>80% of a program's time is spent in a function you make 4 times faster. What is the overall speedup? What is the maximum possible speedup from optimizing that function?</p></ask>
+<sol><p>1/(0.2 + 0.8/4) = 1/0.4 = <b>2.5</b>. Maximum (function takes no time): 1/0.2 = <b>5</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 10 ns block is split into a 5-stage pipeline of 2 ns stages (ignore register overhead). How long do 1000 inputs take, unpipelined and pipelined?</p></ask>
+<sol><p>Unpipelined: 1000 × 10 = <b>10,000 ns</b>. Pipelined: (5 + 999) × 2 = <b>2008 ns</b>, a speedup of 4.98.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A program has 25% serial work. What speedup does it get on 8 cores, and what is the limit with unlimited cores?</p></ask>
+<sol><p>1/(0.25 + 0.75/8) = 1/0.34375 = <b>2.91</b>. Limit: 1/0.25 = <b>4</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Processor A runs at 4 GHz with CPI 2.0; processor B runs at 3 GHz with CPI 1.2 on the same program (same instruction count). Which is faster, and by how much?</p></ask>
+<sol><p>Time per instruction: A = 2.0/4 = 0.5 ns, B = 1.2/3 = 0.4 ns. <b>B is 1.25 times faster</b> despite its lower clock frequency.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Logic of 8 ns is pipelined with a register overhead of 0.5 ns per stage. Compute the clock period and throughput speedup (relative to one stage) for 1, 4, 8 and 16 stages.</p></ask>
+<sol><p>T = 8/k + 0.5. k = 1: 8.5 ns (1.0). k = 4: 2.5 ns (<b>3.4×</b>). k = 8: 1.5 ns (<b>5.7×</b>). k = 16: 1.0 ns (<b>8.5×</b>). Doubling the stages from 8 to 16 gives only 1.5× more, and no number of stages can beat 1/0.5 ns = 2 GHz.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>In a 5-stage pipeline with full forwarding and a one-cycle load-use stall, how many stall cycles does this sequence incur?</p>
+<pre lang="riscv">lw   x1, 0(x2)
+add  x3, x1, x4
+sub  x5, x3, x6
+lw   x7, 4(x2)
+and  x8, x5, x9
+or   x10, x7, x8</pre></ask>
+<sol><p>add uses x1 right after the load: <b>1 stall</b>. sub uses x3 from add: forwarded, no stall. and uses x5 from sub (two instructions back): forwarded, no stall; it does not use x7. or uses x7 from the second load, which is two instructions back: by then the load has finished MEM, so it is forwarded from MEM/WB, no stall. Total: <b>1 stall cycle</b>. (Swapping the second lw above sub would not remove the first stall; moving it between the first lw and add would.)</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Compute the CPI for a pipeline with base CPI 1 where 30% of instructions are loads, half of which have a dependent instruction immediately after (1 stall), and 20% are branches, predicted with 90% accuracy and a 3-cycle misprediction penalty.</p></ask>
+<sol><p>CPI = 1 + 0.30 × 0.5 × 1 + 0.20 × 0.10 × 3 = 1 + 0.15 + 0.06 = <b>1.21</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A loop branch is taken 9 times and then not taken once, and the loop runs many times. What is the steady-state accuracy of a 1-bit predictor (predict the last outcome) and of a 2-bit saturating counter?</p></ask>
+<sol><p>1-bit: it mispredicts the exit (predicting taken) and then the first iteration of the next run (predicting not taken, the last outcome): <b>2 misses per 10, 80%</b>. 2-bit: the exit moves the counter from strongly to weakly taken, so the next run's first iteration is still predicted taken: <b>1 miss per 10, 90%</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using Gustafson's law, what scaled speedup does a workload with a 5% serial fraction achieve on 64 processors? Compare with Amdahl's prediction for the same fraction.</p></ask>
+<sol><p>Gustafson: 0.05 + 0.95 × 64 = <b>60.85</b>. Amdahl (fixed problem size): 1/(0.05 + 0.95/64) ≈ <b>15.4</b>. The difference is the assumption: Gustafson grows the problem so that the parallel part dominates.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design A is a 5-stage pipeline at 1 GHz with a 2-cycle branch misprediction penalty. Design B is a 10-stage pipeline at 1.8 GHz with a 5-cycle penalty. With 20% branches and a 10% misprediction rate (and no other stalls), which is faster and by how much?</p></ask>
+<sol><p>A: CPI = 1 + 0.2 × 0.1 × 2 = 1.04 → 1.04 ns per instruction. B: CPI = 1 + 0.2 × 0.1 × 5 = 1.10 → 1.10/1.8 = 0.611 ns. <b>B is 1.70 times faster.</b> With a worse predictor (say 30% mispredictions) B's CPI would be 1.30 → 0.72 ns, still faster but by less: deeper pipelines need better prediction.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Identify every true (read-after-write), anti (write-after-read) and output (write-after-write) dependence in this code, and say which ones register renaming removes.</p>
+<pre lang="riscv">div  x1, x2, x3
+add  x4, x1, x5
+sub  x1, x6, x7
+mul  x8, x1, x4</pre></ask>
+<sol><p>RAW: add reads x1 from div; mul reads x1 from sub and x4 from add. WAR: sub writes x1, which add reads (sub must not overwrite x1 before add has read it). WAW: div and sub both write x1. Renaming gives sub's x1 a new physical register, which removes the <b>WAR and WAW</b> dependences, so sub can execute immediately instead of waiting behind the slow div and add. The <b>RAW</b> dependences are real data flow and remain.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Why does pipelining increase the latency of an individual operation slightly, and why do designers accept that?</p></ask>
+<sol><p>Each stage adds register overhead (t<sub>clk→Q</sub> + t<sub>setup</sub>), and the clock is set by the slowest stage, so an operation spends k × T<sub>stage</sub> ≥ T<sub>logic</sub> + k·t<sub>reg</sub> in the pipeline. Designers accept it because the goal is throughput over long streams of independent operations (instructions, pixels, packets), where the rate of one result per cycle dominates. When an operation's result is needed immediately by the next (dependencies), latency matters again, which is why forwarding and short critical loops (ALU to ALU, load to use) get so much attention.</p></sol>
+</prob>
+</practice>
+</module>

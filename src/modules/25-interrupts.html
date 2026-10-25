@@ -1,0 +1,174 @@
+<module id="interrupts" num="25" part="6" title="Interrupts and timers" short="Interrupts and timers" pre="swfsm" blurb="Responding to events without polling: how an interrupt is taken, vectors and enables on the AVR, pin-change interrupts, hardware timers in CTC and PWM modes, the flag idiom, why shared variables must be volatile, and how to avoid races with critical sections.">
+
+<p>So far the processor has found out about events by checking for them: reading a button pin every loop iteration, or spinning in a delay loop to measure time. Checking is called <b>polling</b>, and it has two costs: the processor spends time checking things that have not happened, and anything that happens between checks waits. I/O events occur on a scale of milliseconds while instructions take tens of nanoseconds, so a processor that polls spends almost all its time asking "anything yet?". <b>Interrupts</b> reverse the responsibility: the device signals the processor when something happens, and the processor stops what it is doing just long enough to deal with it.</p>
+
+<h3>What happens when an interrupt occurs</h3>
+<p>An interrupt is one kind of <b>exception</b>: an event that diverts the processor from the normal flow of the program. Exceptions include hardware interrupts from devices (a pin changed, a timer expired, a byte arrived), error conditions detected by the processor itself (an illegal instruction, an invalid address, division by zero on processors that trap it), and deliberate traps such as system calls into an operating system. Hardware detects the event; software, in an <b>interrupt service routine</b> (ISR), handles it.</p>
+<diagram name="isr_timeline">The life of an interrupt. On the AVR, the hardware saves only the program counter; the compiler-generated ISR prologue saves any registers the ISR uses.</diagram>
+<ol>
+<li>The device sets an <b>interrupt flag</b> in one of its registers.</li>
+<li>After finishing the current instruction (the fourth step of the instruction cycle in <ref to="datapath"/>), the processor checks for enabled, pending interrupts.</li>
+<li>If one is pending, it saves the return address on the stack, disables further interrupts by clearing the global interrupt-enable bit, and jumps to the address stored for that interrupt in the <b>vector table</b>.</li>
+<li>The ISR runs. Its <code>reti</code> (return from interrupt) instruction restores the program counter and re-enables interrupts, and the interrupted program continues exactly where it left off.</li>
+</ol>
+<p>An ISR looks like a function but is not called by the program. It runs asynchronously, between any two instructions of the main code; it takes no arguments and returns no value. It communicates with the rest of the program only through global variables and hardware registers.</p>
+
+<h3>Interrupts on the AVR</h3>
+<p>The ATmega328P has over twenty interrupt sources, each with its own vector: external interrupts INT0 and INT1; pin-change interrupts for each port (PCINT0 for port B, PCINT1 for C, PCINT2 for D); timer compare-match and overflow interrupts; USART receive-complete and transmit interrupts; SPI and TWI transfer complete; ADC conversion complete; and others. In avr-gcc an ISR is written with the <code>ISR()</code> macro and the vector's name, such as <code>ISR(TIMER1_COMPA_vect)</code> or <code>ISR(PCINT2_vect)</code>.</p>
+<p>An interrupt is taken only when three things are true:</p>
+<ul>
+<li>its <b>local enable</b> bit is set in the peripheral's interrupt mask register (for example OCIE1A in TIMSK1);</li>
+<li>the <b>global interrupt enable</b> (the I bit in the status register) is set, with <code>sei()</code>; <code>cli()</code> clears it;</li>
+<li>the event has occurred and set the interrupt <b>flag</b> (for example OCF1A in TIFR1). The flag is cleared automatically when the ISR starts.</li>
+</ul>
+<warn><p>Enabling an interrupt without defining its ISR sends the processor to a default handler, which on the AVR jumps to the reset vector: the program appears to restart at random. Every enabled interrupt needs an ISR.</p></warn>
+<p>A pin-change interrupt fires when any enabled pin of its port changes in either direction. It does not say which pin changed or which way, so the ISR reads the PIN register and compares it with the previous value:</p>
+<pre lang="c">#include <avr/io.h>
+#include <avr/interrupt.h>
+
+volatile uint8_t button_changed = 0;
+
+ISR(PCINT2_vect)                    // any enabled pin on port D changed
+{
+    button_changed = 1;             // just record the event; keep the ISR short
+}
+
+int main(void)
+{
+    PORTD  |= (1 << PD2);           // button input with pull-up
+    PCMSK2 |= (1 << PCINT18);       // PD2 is pin-change source PCINT18
+    PCICR  |= (1 << PCIE2);         // enable pin-change interrupts for port D
+    sei();                          // global enable
+
+    while (1) {
+        if (button_changed) {
+            button_changed = 0;
+            /* read PIND, debounce, act */
+        }
+    }
+}</pre>
+
+<h3>Hardware timers</h3>
+<p>A timer is a counter (TCNT) clocked by the system clock divided by a <b>prescaler</b> N (1, 8, 64, 256 or 1024 on the AVR). It counts at a precisely known rate, independent of what the program is doing, which makes it far more accurate than counting loop iterations: a delay-based loop runs late by however long its other work took, while a timer does not drift.</p>
+<p>In <b>CTC</b> (clear timer on compare) mode, the counter is compared with an output-compare register (OCR) on every count; on a match it sets the compare flag, optionally requests an interrupt, and resets to zero. The result is a periodic event with</p>
+<eq c>period = (OCR + 1) × N / f<sub>clk</sub>      ⇒      OCR = f<sub>clk</sub> × period / N − 1</eq>
+<diagram name="timer_ctc">A timer in CTC mode: one compare match, and one interrupt, per period.</diagram>
+<ex title="A quarter-second tick">
+<p>With f<sub>clk</sub> = 16 MHz and prescaler N = 256, the timer counts at 62.5 kHz (16 μs per count). A 0.25 s period needs 0.25 × 62,500 = 15,625 counts, so OCR1A = 15,624. (Many examples use 15,625, which gives 0.250016 s, an error of 0.006%.) The 16-bit Timer1 is needed because the count exceeds 255.</p>
+<pre lang="c">void timer1_init(void)
+{
+    TCCR1B |= (1 << WGM12);         // CTC mode, TOP = OCR1A
+    OCR1A   = 15624;                // 0.25 s at 16 MHz / 256
+    TIMSK1 |= (1 << OCIE1A);        // enable the compare-match A interrupt
+    TCCR1B |= (1 << CS12);          // prescaler 256: this starts the timer
+}
+
+volatile uint8_t tick = 0;
+ISR(TIMER1_COMPA_vect) { tick = 1; }</pre>
+<p>The prescaler is chosen as the smallest one for which OCR fits in the timer's width, which gives the finest resolution.</p>
+</ex>
+<tool name="avrtimer"/>
+<p>Driving the superloop of <ref to="swfsm"/> from a timer replaces <code>_delay_ms()</code> with "wait until the tick flag is set, then clear it". Each iteration then starts exactly one period after the previous one, however long the tasks took, as long as they finish within the period.</p>
+
+<h3>PWM with timers</h3>
+<p>Timers also generate waveforms directly on output pins with no software involvement. In <b>fast PWM</b> mode the counter ramps from 0 to TOP and wraps; the output pin is set at the start of each period and cleared when the counter passes the compare value, so the duty cycle is set by the compare register:</p>
+<diagram name="pwm_fast">Fast PWM. Changing OCR changes the duty cycle from the next period on.</diagram>
+<ul>
+<li>8-bit fast PWM: f<sub>PWM</sub> = f<sub>clk</sub>/(N × 256), duty = (OCR + 1)/256. With 16 MHz and N = 64, f<sub>PWM</sub> ≈ 977 Hz.</li>
+<li>Phase-correct PWM counts up and then down, halving the frequency (f<sub>clk</sub>/(N × 510)) but producing pulses centered in each period, which motor drivers prefer.</li>
+<li>A hobby servo wants a 50 Hz frame with a 1 to 2 ms pulse. Timer1 with TOP set by ICR1 provides it: with N = 8 the timer counts at 2 MHz, so TOP = 2 MHz/50 − 1 = 39,999 and a 1.5 ms pulse needs OCR1A = 2999.</li>
+</ul>
+<p>PWM controls LED brightness, motor speed and heater power, and with a low-pass filter becomes a simple DAC (<ref to="analog"/>).</p>
+
+<h3>Writing correct ISRs</h3>
+<p>Interrupts introduce concurrency: the main program and the ISR share variables and hardware, and the ISR can run between any two instructions. Three rules prevent most bugs.</p>
+<p><b>Keep ISRs short.</b> While an AVR ISR runs, other interrupts are disabled and wait. Long ISRs delay other events and can lose them (a second event of the same kind only sets a flag that is already set). The usual idiom is for the ISR to do only what must happen immediately, set a flag or store a value, and let the main loop do the rest. Never write to a slow display or wait inside an ISR.</p>
+<p><b>Declare shared variables <code>volatile</code>.</b> Within one function, the compiler may keep a variable in a register and assume it cannot change behind its back. In</p>
+<pre lang="c">uint8_t flag = 0;            // missing volatile
+ISR(TIMER1_COMPA_vect) { flag = 1; }
+...
+while (flag == 0) { }        //! may compile to an infinite loop</pre>
+<p>the compiler can load <code>flag</code> once, see that nothing in the loop changes it, and loop forever. <code>volatile</code> forces a fresh memory access every time the variable is read or written. It is required for every global shared between an ISR and other code (and for memory-mapped registers, which the AVR headers already declare volatile).</p>
+<p><b>Protect multi-step accesses.</b> An operation that takes several instructions can be interrupted in the middle. On an 8-bit processor, even reading a 16-bit variable takes two instructions. If an ISR increments a 16-bit counter from 0x00FF to 0x0100 between the main program's two byte reads, the main program can read the low byte 0xFF and then the new high byte 0x01, getting 0x01FF, a value the counter never held. Read-modify-write sequences such as <code>x++</code> or <code>PORTB |= 0x01</code> (load, OR, store) have the same problem when the ISR modifies the same variable or register. The fix is a <b>critical section</b> that disables interrupts for the few instructions involved:</p>
+<pre lang="c">#include <util/atomic.h>
+
+volatile uint16_t ticks;            // incremented by a timer ISR
+
+uint16_t read_ticks(void)
+{
+    uint16_t copy;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {   // disables interrupts, restores the previous state afterwards
+        copy = ticks;
+    }
+    return copy;
+}</pre>
+<p><code>ATOMIC_RESTORESTATE</code> restores the interrupt-enable bit to what it was, rather than blindly re-enabling interrupts, so the block is safe even if called from code that already had interrupts disabled. Critical sections must be short, because they add to the latency of every interrupt.</p>
+
+<h3>Latency, priority and the watchdog</h3>
+<p>Interrupt <b>latency</b>, the time from the event to the first instruction of the ISR, is a few cycles plus the remainder of the current instruction plus any time interrupts are disabled, by another ISR or a critical section. When several interrupts are pending, the AVR serves them in a fixed priority order given by the vector table and does not nest ISRs unless the programmer re-enables interrupts inside one. Larger microcontrollers have interrupt controllers with programmable priorities and nesting, so an urgent interrupt can preempt a less urgent ISR.</p>
+<p>A <b>watchdog timer</b> is a timer that resets the microcontroller if it ever expires. The program restarts it periodically ("kicks the dog") from its main loop; if a bug or a glitch hangs the program, the kicks stop and the watchdog forces a reset instead of leaving the system stuck.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Polling checks repeatedly; interrupts let the device notify the processor. ISRs run asynchronously, between any two instructions.</li>
+<li>Taking an interrupt: finish the instruction, save the PC, disable interrupts, jump through the vector table; reti returns and re-enables.</li>
+<li>AVR: local enable + global I bit (sei/cli) + flag. Every enabled interrupt needs an ISR.</li>
+<li>Timers count prescaled clock cycles. CTC: period = (OCR + 1)·N/f<sub>clk</sub>. Fast PWM: f = f<sub>clk</sub>/(N·256), duty from OCR.</li>
+<li>Keep ISRs short (set a flag); declare shared globals volatile; protect multi-byte and read-modify-write accesses with critical sections.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>List the three conditions that must all hold for the Timer1 compare-match A interrupt to be taken.</p></ask>
+<sol><p>The local enable OCIE1A in TIMSK1 is set; the global enable (I bit) is set with <code>sei()</code>; and the compare match has occurred, setting the flag OCF1A.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>With a 16 MHz clock and a prescaler of 64, how fast does a timer count, and how long is one count?</p></ask>
+<sol><p>16 MHz/64 = <b>250 kHz</b>, so one count is <b>4 μs</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What OCR value gives a 1 ms CTC period at 16 MHz with prescaler 64? Does it fit in an 8-bit timer?</p></ask>
+<sol><p>OCR = 16 × 10⁶ × 0.001/64 − 1 = 250 − 1 = <b>249</b>, which fits in 8 bits (≤ 255), so Timer0 or Timer2 can generate it.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What is the longest CTC period Timer1 (16 bits) can produce at 16 MHz, and with which prescaler?</p></ask>
+<sol><p>Prescaler 1024 and OCR = 65,535: 65,536 × 1024/16 × 10⁶ = <b>4.19 s</b>. Longer intervals need a software counter of timer ticks.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why does a delay-based superloop drift over time while a timer-driven one does not?</p></ask>
+<sol><p>A delay loop's iteration time is the delay plus the time the tasks take, and that varies; the errors accumulate. A timer counts the clock continuously in hardware, and the ISR marks each period's start independently of how long the software took (provided the tasks finish within the period).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Explain why the loop <code>while (flag == 0) { }</code> can hang forever if <code>flag</code> is set by an ISR but not declared volatile, and why <code>volatile</code> fixes it.</p></ask>
+<sol><p>The compiler sees no assignment to <code>flag</code> inside the loop or the function, so it may load it into a register once and test that register forever, or even replace the loop with an infinite loop. The ISR's write to memory is never re-read. <code>volatile</code> tells the compiler the value can change outside the visible code, so every read in the loop is a real memory load.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A timer ISR increments <code>volatile uint16_t ticks</code>. The main program reads it with a simple assignment while the value changes from 0x00FF to 0x0100. Which wrong value can it see, and how do you prevent it?</p></ask>
+<sol><p>The 8-bit AVR reads the low byte and the high byte with separate instructions. If it reads the low byte (0xFF), then the ISR increments the counter, then it reads the high byte (0x01), the result is <b>0x01FF</b> = 511, although the counter went from 255 to 256. Read it inside <code>ATOMIC_BLOCK(ATOMIC_RESTORESTATE)</code> (or between <code>cli()</code> and the previous state's restoration) so the ISR cannot run between the two byte reads.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Configure 8-bit fast PWM at 16 MHz with prescaler 8. What is the PWM frequency, and what OCR value gives a 25% duty cycle?</p></ask>
+<sol><p>f = 16 × 10⁶/(8 × 256) = <b>7812.5 Hz</b>. Duty = (OCR + 1)/256 = 0.25 → OCR = <b>63</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Set up Timer1 for a hobby servo: a 50 Hz frame with prescaler 8 at 16 MHz. What TOP value goes in ICR1, and what OCR1A values give 1.0 ms, 1.5 ms and 2.0 ms pulses?</p></ask>
+<sol><p>The timer counts at 2 MHz (0.5 μs). TOP = 2 × 10⁶/50 − 1 = <b>39,999</b>. Pulses: 1.0 ms = 2000 counts → OCR1A = <b>1999</b>; 1.5 ms → <b>2999</b>; 2.0 ms → <b>3999</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A pin-change interrupt is enabled for PD2 and PD3. Inside the ISR, how can the program determine which pin changed and in which direction?</p></ask>
+<sol><p>Keep the previous value of PIND in a static (or global) variable. In the ISR: <code>uint8_t now = PIND; uint8_t changed = now ^ prev; prev = now;</code>. A 1 in bit 2 or 3 of <code>changed</code> marks a pin that changed; that bit of <code>now</code> gives its new level (1 = rose, 0 = fell).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>The main program executes <code>PORTB |= 0x01;</code> (compiled as load, OR, store) while a timer ISR toggles bit 7 of PORTB. Describe the race, and give two fixes.</p></ask>
+<sol><p>If the ISR runs after the main program loads PORTB but before it stores the result, the ISR's change to bit 7 is overwritten by the stale copy: the toggle is lost. Fixes: wrap the main program's read-modify-write in a critical section (disable interrupts briefly); or use operations that are atomic in hardware, such as single-bit <code>sbi</code>/<code>cbi</code> on low I/O registers or writing 1 to the PIN register to toggle one bit; or arrange for only one context to write that register.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A UART at 115,200 baud receives 10-bit frames back to back. How much time is there between received bytes, how many 16 MHz clock cycles is that, and what does it imply for the receive ISR and for critical sections elsewhere?</p></ask>
+<sol><p>115,200/10 = 11,520 bytes/s → <b>86.8 μs</b> per byte = <b>about 1389 cycles</b>. The hardware receive buffer holds very little, so the ISR must read each byte before the next one arrives; the ISR itself should take tens of cycles, and no other ISR or critical section may block interrupts for anything close to 1389 cycles, or bytes are lost (an overrun).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Why should an ISR not write to an LCD, and how should the program be structured instead?</p></ask>
+<sol><p>Writing to the display takes tens of microseconds to milliseconds per character, and on the AVR other interrupts are blocked while the ISR runs, so timer ticks, received bytes and button events would be delayed or lost. The display code may also be interrupted halfway through a command by the main program's own display code, corrupting the protocol. The ISR should store the new value and set a flag; the main loop checks the flag and updates the display.</p></sol>
+</prob>
+</practice>
+</module>

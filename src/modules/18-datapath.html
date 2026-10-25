@@ -1,0 +1,137 @@
+<module id="datapath" num="18" part="5" title="Inside a processor: datapath and control" short="Processor datapath" pre="fsm,arith,registers" blurb="How the building blocks become a computer: buses and memory-mapped I/O, instruction sets and encodings, why registers exist, the register file, a single-cycle datapath and its control signals, and how C statements turn into instructions.">
+
+<p>A processor is the datapath-plus-controller pattern of <ref to="fsm"/> taken to its logical end: a datapath general enough to perform any computation, and a controller that takes its instructions from memory instead of having them wired in. This module assembles one from the parts already built: registers, an ALU, multiplexers, decoders and memory.</p>
+
+<h3>Processor, memory and I/O</h3>
+<p>A computer has three kinds of component. The <b>processor</b> (CPU) executes instructions. <b>Memory</b> holds both the program and its data as numbered locations, each identified by an address. <b>I/O devices</b> (ports, displays, timers, network interfaces) connect it to the outside world. They communicate over <b>buses</b>: an address bus carries the location being accessed, a data bus carries the value, and control signals say whether the access is a read or a write and when it is valid.</p>
+<diagram name="computer_bus">The classic bus organization. Modern systems replace shared wires with point-to-point links and on-chip networks, but the read/write-by-address model is unchanged.</diagram>
+<p>Most processors use <b>memory-mapped I/O</b>: each device's control and data registers are assigned addresses, and the processor reads and writes them with ordinary load and store instructions. On the ATmega328P, for example, the GPIO register PORTB sits at data-space address 0x25, so the C statement <code>PORTB = 0x20;</code> compiles to a store of the value 0x20 to that address. Writing to it does not change a memory cell; it changes the voltages on eight pins (<ref to="mcu"/>).</p>
+<p>It helps to know where things live while a program runs: the compiled program and its global variables are in memory (loaded from storage when the program starts), local variables are in registers or on the stack in memory, the processor's working values are in its registers, and a display's pixels are in video memory that the display hardware reads continuously.</p>
+
+<h3>Instruction sets</h3>
+<def term="Instruction set architecture">The contract between hardware and software: the registers a program can see, the instructions and their binary encodings, the data types, how memory is addressed, and how exceptions behave. Any processor implementing the ISA runs the same programs; ARM, x86-64 and RISC-V are ISAs.</def>
+<p>Modern ISAs are mostly <b>load-store</b> (RISC) designs: arithmetic instructions operate only on registers, and separate load and store instructions move data between registers and memory. This keeps each instruction simple and regular, which makes it fast to decode and easy to pipeline. Older CISC designs such as x86 allow arithmetic directly on memory operands; modern x86 processors translate those instructions internally into RISC-like micro-operations.</p>
+<p>Registers exist because memory is slow and far away compared with the ALU. Consider F = (X + Y) − (X·Y) with X, Y and F in memory. A machine that can only operate memory-to-memory reads two operands and writes one result for each of its three operations: 9 memory accesses, with the intermediate results stored and reloaded. A load-store machine loads X and Y once (2 accesses), computes everything in registers, and stores F (1 access): 3 accesses. Compilers work hard to keep values in registers for exactly this reason.</p>
+
+<h3>Encoding instructions</h3>
+<p>An instruction is a binary word divided into <b>fields</b>: an opcode saying what to do, and operand fields naming registers or holding constants (immediates). Decoding means slicing the word into fields, which is free in hardware (just wires), and then decoding the opcode into control signals.</p>
+<diagram name="instr_format">Two encodings. In the teaching format, 0x0201 splits into four 4-bit fields meaning "R2 ← R0 + R1". The RISC-V R-type format has the same idea at 32 bits: the opcode and the funct3/funct7 fields together select the operation.</diagram>
+<p>Fixed field positions are a deliberate design choice: in RISC-V the source register fields are in the same place in every format that has them, so the register file can be read in parallel with decoding the opcode, before the processor even knows what the instruction is.</p>
+
+<h3>The register file</h3>
+<p>A <b>register file</b> is an array of registers with read and write ports. A typical integer register file has 32 registers of 32 or 64 bits, two read ports (for the two source operands) and one write port (for the result).</p>
+<diagram name="regfile">Four registers, one write port and two read ports. The write address is decoded to enable exactly one register; each read port is a wide multiplexer.</diagram>
+<ul>
+<li>A <b>write port</b> is a decoder on the write address, ANDed with a global write enable (RegWrite), producing the load enable of exactly one register. The write data goes to every register's D inputs; only the enabled one loads it.</li>
+<li>A <b>read port</b> is an n-to-1 multiplexer whose select is the read address. An m-bit-wide n-to-1 mux is simply m separate n-to-1 muxes sharing the same select lines: a 32-bit read port on a 32-register file is 32 copies of a 32-to-1 mux.</li>
+<li>Adding a port adds another mux (read) or decoder plus data path (write). Register files with many ports, as needed by processors that issue several instructions per cycle, grow quickly in area and delay.</li>
+</ul>
+
+<h3>A single-cycle datapath</h3>
+<p>The datapath below executes one instruction per clock cycle for a small RISC-V-like instruction set: register arithmetic (add), arithmetic with an immediate (addi), load word (lw), store word (sw) and branch if equal (beq).</p>
+<diagram name="cpu_datapath">The single-cycle datapath. Muxes choose between alternative sources (ALUSrc: register or immediate; MemtoReg: ALU result or loaded data), and the control unit sets them from the opcode.</diagram>
+<p>Follow each instruction through it:</p>
+<ul>
+<li><b>add rd, rs1, rs2</b>: read rs1 and rs2, the ALU adds them (ALUSrc selects the register), and the ALU result is written to rd (MemtoReg selects the ALU).</li>
+<li><b>lw rd, offset(rs1)</b>: the ALU adds rs1 and the sign-extended immediate to form the address, the data memory is read, and the loaded value is written to rd. This is the longest path: instruction memory, register read, ALU, data memory, register write.</li>
+<li><b>sw rs2, offset(rs1)</b>: the address is computed the same way, and rs2 is written to the data memory. Nothing is written to the register file.</li>
+<li><b>beq rs1, rs2, offset</b>: the ALU subtracts and checks for zero; if equal, the next-PC logic loads PC + offset instead of PC + 4.</li>
+</ul>
+<grid cls="mono">Instruction | RegWrite | ALUSrc | ALU op | MemRead | MemWrite | MemtoReg | Branch
+add | 1 | 0 (reg) | add | 0 | 0 | 0 (ALU) | 0
+addi | 1 | 1 (imm) | add | 0 | 0 | 0 (ALU) | 0
+lw | 1 | 1 (imm) | add | 1 | 0 | 1 (mem) | 0
+sw | 0 | 1 (imm) | add | 0 | 1 | x | 0
+beq | 0 | 0 (reg) | subtract | 0 | 0 | x | 1</grid>
+<p>The control unit is a combinational decoder from opcode bits to these signals: a truth table like any other, minimized with the techniques of <ref to="kmaps"/>. The ALU's own function code comes from the instruction's function fields, as in the ALU of <ref to="arith"/>. The don't-care entries (MemtoReg for instructions that do not write a register) are what make the logic small.</p>
+<p>In a single-cycle design the clock period must accommodate the slowest instruction (lw), so every instruction takes that long, and the instruction and data memories must be separate because both are accessed in the same cycle. Two alternatives fix these problems. A <b>multi-cycle</b> design breaks each instruction into steps (fetch, decode, execute, memory, write-back), one per short clock cycle, sequenced by a state machine; simple instructions finish in fewer cycles and hardware such as the ALU and memory can be reused across steps. A <b>pipelined</b> design overlaps the steps of successive instructions, the subject of <ref to="perf"/>.</p>
+
+<h3>The instruction cycle</h3>
+<p>Whatever the implementation, the processor repeats the same loop:</p>
+<ol>
+<li><b>Fetch:</b> send the PC to memory, read the instruction, and advance the PC (to PC + 4 for 32-bit instructions).</li>
+<li><b>Decode:</b> split the instruction into fields, read the source registers, and generate control signals.</li>
+<li><b>Execute:</b> perform the ALU operation, compute an address, or evaluate a branch condition.</li>
+<li><b>Memory access</b> (loads and stores only).</li>
+<li><b>Write back</b> the result to a register.</li>
+<li>Check for pending <b>interrupts</b> or exceptions before starting the next instruction (<ref to="interrupts"/>).</li>
+</ol>
+<p>The PC is a register with an incrementer and a load path, which is the counter of <ref to="registers"/>: it counts through sequential instructions and is loaded with a new value by branches, jumps, function calls and interrupts.</p>
+
+<h3>From C to instructions</h3>
+<p>A compiler maps each C statement onto this machinery. For <code>a[i] = a[i] + 5;</code> with a 32-bit int array whose base address is in register a0 and with i in a1, a RISC-V compiler produces:</p>
+<pre lang="riscv">slli t0, a1, 2      # t0 = i * 4 (byte offset of a[i])
+add  t0, a0, t0     # t0 = &a[i]
+lw   t1, 0(t0)      # t1 = a[i]
+addi t1, t1, 5      # t1 = a[i] + 5
+sw   t1, 0(t0)      # a[i] = t1</pre>
+<p>Array indexing becomes a shift and an add (the scaling by the element size is why pointer arithmetic in C is scaled), the variable lives in a register while it is used, and memory is touched only by the load and the store. A function call saves the return address in a register (the link register), passes arguments in registers, and uses the stack in memory for anything that does not fit, according to a calling convention that is part of the platform's ABI.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>A computer is processor + memory + I/O on buses; memory-mapped I/O makes device registers look like memory locations.</li>
+<li>The ISA is the hardware-software contract. Load-store (RISC) ISAs compute only in registers; registers cut memory traffic.</li>
+<li>Instructions are fields; decoding is slicing plus a combinational decoder for the opcode.</li>
+<li>Register file: write port = decoder + enables; read port = wide mux (m copies of an n-to-1 mux).</li>
+<li>Single-cycle datapath: PC, instruction memory, register file, ALU with ALUSrc mux, data memory, MemtoReg mux; control signals come from a decoder of the opcode.</li>
+<li>Instruction cycle: fetch, decode, execute, memory, write back, check interrupts.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>In the 16-bit format (4-bit opcode, dst, src1, src2) with opcodes 0 = ADD, 1 = SUB, 2 = AND, 3 = OR, decode 0x3254 and encode "SUB R7, R1, R3" (R7 ← R1 − R3).</p></ask>
+<sol><p>0x3254 → opcode 3 (OR), dst 2, src1 5, src2 4: <b>R2 ← R5 OR R4</b>. SUB R7, R1, R3 → 1, 7, 1, 3 → <b>0x1713</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What is memory-mapped I/O? Give an example of what a store instruction to a device address can do.</p></ask>
+<sol><p>Device registers are given addresses in the processor's address space and accessed with ordinary loads and stores. A store to a GPIO output register such as PORTB changes pin voltages (turning an LED on); a store to a UART data register starts transmitting a byte; a load from a status register reports whether a device is ready.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Count the data-memory accesses needed to compute F = (X + Y)·(X − Y), with X, Y and F in memory, on a memory-to-memory machine and on a load-store machine.</p></ask>
+<sol><p>Memory-to-memory: three operations (add, subtract, multiply), each reading two operands and writing one result: <b>9 accesses</b>. Load-store: load X, load Y, three register operations, store F: <b>3 accesses</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A register file has 32 registers of 64 bits, two read ports and one write port. What decoder does the write port need, and how many 32-to-1 multiplexers do the read ports need in total?</p></ask>
+<sol><p>Write port: a <b>5-to-32 decoder</b> (ANDed with RegWrite). Read ports: each 64-bit port is 64 32-to-1 muxes; two ports need <b>128</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Give the control signal values for <code>sw</code> and explain why MemtoReg is a don't care for it.</p></ask>
+<sol><p>RegWrite 0, ALUSrc 1 (immediate offset), ALU add, MemRead 0, MemWrite 1, Branch 0, MemtoReg x. MemtoReg only chooses what would be written to the register file, and a store writes no register (RegWrite = 0), so its value cannot matter.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Encode the RISC-V instruction <code>add x5, x6, x7</code> in hexadecimal. (R-type: funct7 = 0000000, rs2, rs1, funct3 = 000, rd, opcode = 0110011.)</p></ask>
+<sol><p>Fields: 0000000 | 00111 | 00110 | 000 | 00101 | 0110011. Grouped in fours: 0000 0000 0111 0011 0000 0010 1011 0011 = <b>0x007302B3</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Which datapath elements does each of add, lw, sw and beq use? Which instruction determines the single-cycle clock period, and why?</p></ask>
+<sol><p>All use instruction memory, the register file read ports and the ALU. add: plus register write. <b>lw</b>: plus data memory read and register write. sw: plus data memory write (no register write). beq: plus the branch/next-PC logic (no memory, no register write). <b>lw</b> sets the period because its path is longest: instruction fetch, register read, ALU, data memory read, register write setup.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Why must a single-cycle processor have separate instruction and data memories, while a multi-cycle processor can share one?</p></ask>
+<sol><p>In the single-cycle design a load or store reads its instruction and accesses data in the same cycle, so it needs two memory accesses at once: a structural conflict unless there are two memories (or a dual-ported one). A multi-cycle design fetches in one cycle and accesses data in a later one, so one memory, shared over time, suffices.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write RISC-V-style instructions for <code>x = y + z * 8;</code> with y in a1, z in a2 and x to be left in a0, using only add, addi and slli. How would the compiler handle <code>* 10</code>?</p></ask>
+<sol><p><code>slli t0, a2, 3</code> (t0 = z·8), <code>add a0, a1, t0</code>. Multiplying by 10 = 8 + 2: <code>slli t0, a2, 3; slli t1, a2, 1; add t0, t0, t1; add a0, a1, t0</code>, or a single <code>mul</code> if the ISA has one. Compilers replace multiplication by constants with shifts and adds when that is cheaper.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>In C on an AVR, <code>*(volatile uint8_t *)0x25 = 0x20;</code> has the same effect as <code>PORTB = 0x20;</code>. Explain what the cast does and why <code>volatile</code> is needed.</p></ask>
+<sol><p>The integer 0x25 is converted to a pointer to an 8-bit unsigned value, and the assignment stores through it: a store instruction to data address 0x25, where PORTB is mapped. <code>volatile</code> tells the compiler that accesses to that location have side effects it cannot see, so it must perform every read and write exactly as written, rather than removing "redundant" stores or caching values in registers (<ref to="interrupts"/>).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A single-cycle processor's clock is set by lw at 800 ps. A multi-cycle version uses a 200 ps clock; lw takes 5 cycles, R-type and sw 4, beq 3. For a mix of 25% lw, 45% R-type, 10% sw and 20% beq, compare the average time per instruction.</p></ask>
+<sol><p>Single-cycle: <b>800 ps</b> for every instruction. Multi-cycle CPI = 0.25·5 + 0.45·4 + 0.10·4 + 0.20·3 = 1.25 + 1.8 + 0.4 + 0.6 = 4.05 → 4.05 × 200 = <b>810 ps</b>. About the same here: the multi-cycle design's benefit is mostly hardware reuse; the large speedup comes from pipelining, which keeps the short cycle and approaches CPI = 1.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>The five supported opcodes have bits op[6:4] = 011 (R-type), 001 (addi), 000 (lw), 010 (sw) and 110 (beq); all other codes never occur. Derive minimal equations for RegWrite, ALUSrc, MemWrite and Branch from op[6:4].</p></ask>
+<sol><p>Use the three unused codes (100, 101, 111) as don't cares and minimize each signal over op6 op5 op4:</p>
+<ul>
+<li><b>Branch = op6</b>: only beq has op6 = 1.</li>
+<li><b>RegWrite = op5′ + op4</b>: 1 for 000, 001 and 011; the don't cares absorb op6.</li>
+<li><b>ALUSrc = op5′ + op6′·op4′</b>: 1 for 000, 001 and 010.</li>
+<li><b>MemWrite = op6′·op5·op4′</b>: only 010; op6′ is required because beq (110) also has op5 = 1 and op4 = 0.</li>
+</ul>
+<p>Choosing opcode bit patterns so that control signals are single bits or small functions is a deliberate part of ISA design.</p></sol>
+</prob>
+</practice>
+</module>

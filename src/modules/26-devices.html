@@ -1,0 +1,143 @@
+<module id="devices" num="26" part="6" title="Talking to devices: displays and serial buses" short="Devices and serial buses" pre="interrupts,interfacing" blurb="How a microcontroller exchanges data with other chips: reading a datasheet, driving a character LCD over a 4-bit parallel interface with correct strobe timing, and the three standard serial buses (UART, SPI and I²C), with framing, timing, addressing and trade-offs.">
+
+<p>A microcontroller is useful only through the devices around it: displays, sensors, memories, radios and other processors. Each device defines a protocol, a precise description of which signals change, in what order and with what timing. This module works through a parallel interface in detail and then the three serial buses that connect most chips on a board.</p>
+
+<h3>Reading a datasheet</h3>
+<p>Every interfacing task starts with the device's datasheet. For each signal, it answers five questions: what <b>voltage</b> levels are valid (<ref to="interfacing"/>); how much <b>current</b> the pin needs or can supply; which <b>polarity</b> is active (a bar or a trailing # or N in a signal name, as in CS′, means active-low); what <b>timing</b> is required (minimum pulse widths, setup and hold times relative to a clock or strobe, delays before the next operation); and what <b>sequence</b> of operations the device expects, including its power-up initialization. Code that works on the bench but ignores a timing requirement tends to fail when the compiler, the clock speed or the temperature changes.</p>
+
+<h3>A character LCD on a parallel interface</h3>
+<p>The common 16 × 2 character LCD module contains a controller (HD44780 or compatible) with an internal command register and data register. It can be connected with an 8-bit or a 4-bit data bus; the 4-bit mode saves pins by sending each byte as two nibbles.</p>
+<diagram name="lcd_wiring">A 4-bit LCD interface: six microcontroller pins in total.</diagram>
+<ul>
+<li><b>RS</b> (register select) chooses the destination: 0 for a command (clear the screen, move the cursor), 1 for character data to display.</li>
+<li><b>E</b> (enable) is a strobe: the controller latches the data lines when E goes from 1 back to 0. A strobe is needed because the controller cannot tell a new value from the old one by watching the data lines. Sending the byte 0x77 in 4-bit mode puts the nibble 0111 on the bus twice in a row; without a strobe, the second nibble would be indistinguishable from no transfer at all.</li>
+<li>Each byte goes as the upper nibble first, then the lower nibble, each latched by its own E pulse, followed by a delay while the controller executes the command (tens of microseconds, or about 1.5 ms for clear-screen).</li>
+</ul>
+<wavegen name="lcd_nibbles">Writing the character H (0x48): RS = 1, nibble 0100 latched by the first E pulse, nibble 1000 by the second.</wavegen>
+<p>Commands are single bytes. 0x01 clears the display; 0x02 returns the cursor home; 0x0C turns the display on (0x0F also shows a blinking cursor); and 0x80 + address moves the cursor. Row 0 starts at address 0x00 and row 1 at 0x40, so position (row, column) is reached with the command 0x80 + column for row 0 and 0xC0 + column for row 1. The addresses between the rows are unused because the controller supports wider displays, and nothing wraps automatically: text written past column 15 goes to addresses that are not visible.</p>
+<p>The software is naturally layered:</p>
+<pre lang="c">// Lowest layer: put the upper 4 bits of x on PD7..PD4 and pulse E (PB1)
+static void lcd_writenibble(uint8_t x)
+{
+    PORTD = (PORTD & 0x0F) | (x & 0xF0);  // copy the nibble, keep PD3..PD0
+    PORTB |= (1 << PB1);                  // E = 1
+    PORTB |= (1 << PB1);                  // repeated to stretch the pulse (see below)
+    PORTB &= ~(1 << PB1);                 // E = 0: the LCD latches the nibble
+}
+
+static void lcd_writebyte(uint8_t b, uint8_t rs)
+{
+    if (rs) PORTB |= (1 << PB0); else PORTB &= ~(1 << PB0);
+    lcd_writenibble(b);                   // upper nibble
+    lcd_writenibble(b << 4);              // lower nibble
+    _delay_us(40);                        // most commands finish within about 40 us
+}
+
+void lcd_writecommand(uint8_t c) { lcd_writebyte(c, 0); }
+void lcd_writedata(char ch)      { lcd_writebyte((uint8_t)ch, 1); }
+void lcd_moveto(uint8_t row, uint8_t col) { lcd_writecommand((row ? 0xC0 : 0x80) + col); }
+void lcd_stringout(const char *s) { while (*s) lcd_writedata(*s++); }</pre>
+<ex title="When the code is too fast">
+<p>The controller's datasheet requires E to stay high for at least 230 ns. At 16 MHz one clock cycle is 62.5 ns, and the set-bit and clear-bit instructions the compiler generates for <code>PORTB |= …</code> and <code>PORTB &amp;= ~…</code> take 2 cycles each. Setting E and immediately clearing it gives a pulse of only 2 × 62.5 = 125 ns, too short, so the display ignores some nibbles. Repeating the set instruction stretches the pulse to 250 ns; inserting two <code>nop</code> instructions (62.5 ns each) works too; <code>_delay_us(1)</code> also works but wastes time. The general lesson: when software generates a signal for hardware, its timing is set by instruction counts and must be checked against the datasheet.</p>
+</ex>
+
+<h3>Serial communication</h3>
+<p>Parallel buses need one wire per bit, which is impractical between boards and expensive in pins. Serial interfaces send one bit at a time over very few wires. They fall into two families. <b>Synchronous</b> interfaces send a clock along with the data, so the receiver knows exactly when to sample (SPI, I²C). <b>Asynchronous</b> interfaces send no clock; both sides agree on a bit rate in advance and the receiver synchronizes on each frame (the UART). High-speed links such as USB and PCIe embed the clock in the data stream and recover it at the receiver.</p>
+
+<h3>UART: asynchronous serial</h3>
+<p>A UART (universal asynchronous receiver/transmitter) sends each byte as a <b>frame</b> on a line that idles high: a start bit (0), the data bits least significant first, an optional parity bit, and one or two stop bits (1). The common "8N1" format has 8 data bits, no parity and 1 stop bit, 10 bits per byte.</p>
+<wavegen name="uart_frame">The character A (0x41 = 0100 0001) in 8N1 format. The falling edge of the start bit tells the receiver that a frame has begun.</wavegen>
+<p>The receiver detects the start bit's falling edge and then samples each bit near its middle, typically using a clock 16 times the bit rate to locate the middles precisely. Because there is no shared clock, the two sides' bit rates must match closely: the timing error accumulates across the frame, and by the stop bit it must still be under half a bit. That allows roughly 4 to 5% of total mismatch in theory and about 2% per side in practice.</p>
+<p>The AVR USART derives its bit rate from the system clock: UBRR = f<sub>clk</sub>/(16 × baud) − 1. At 16 MHz and 9600 baud, UBRR = 103.2, rounded to 103, which gives 9615 baud, an error of 0.16%. Each side needs TX, RX and a common ground; RS-232 ports use inverted ±12 V levels and need a level converter, while USB-to-serial adapters present a UART at logic levels.</p>
+
+<h3>SPI: a fast synchronous bus</h3>
+<p>The Serial Peripheral Interface connects one controller to one or more peripherals with four signals: <b>SCK</b> (clock from the controller), <b>MOSI</b> (data from controller to peripheral), <b>MISO</b> (data from peripheral to controller) and one active-low <b>select</b> (SS′ or CS′) per peripheral.</p>
+<diagram name="spi_bus">An SPI bus. Peripherals that are not selected leave MISO undriven (tristate).</diagram>
+<p>Both sides contain a shift register. On each clock cycle the controller shifts one bit out on MOSI while the peripheral shifts one bit out on MISO, so after 8 clocks the two registers have exchanged their contents: SPI is inherently full duplex, and to read a byte the controller must send one (often a dummy). The clock polarity (CPOL) and phase (CPHA) settings, four "modes" in all, define which clock edge launches data and which samples it, and both sides must agree.</p>
+<wavegen name="spi_mode0">SPI mode 0: SCK idles low, data is sampled on rising edges and changes on falling edges.</wavegen>
+<p>SPI has no addressing, acknowledgment or flow control, which keeps it simple and fast (tens of MHz): it is the usual choice for flash memories, displays, SD cards and fast ADCs and DACs.</p>
+
+<h3>I²C: a two-wire addressed bus</h3>
+<p>I²C (inter-integrated circuit, also called TWI on AVR) needs only two wires, SDA (data) and SCL (clock), shared by all devices. Both are open-drain lines with pull-up resistors (<ref to="interfacing"/>), so any device can pull a line low and none ever drives it high, which makes sharing safe.</p>
+<ul>
+<li>A transfer begins with a <b>START</b> condition (SDA falls while SCL is high) and ends with a <b>STOP</b> (SDA rises while SCL is high). Otherwise SDA changes only while SCL is low and is sampled while SCL is high.</li>
+<li>The first byte after START is a 7-bit <b>address</b> plus a read/write bit. The addressed device acknowledges by pulling SDA low during a ninth clock (<b>ACK</b>); if nobody responds the line stays high (NACK).</li>
+<li>Data bytes follow, each acknowledged by the receiver. Speeds are 100 kHz (standard), 400 kHz (fast) and 1 MHz (fast-plus).</li>
+<li>A slow device can hold SCL low to pause the controller (<b>clock stretching</b>), and several controllers can share the bus, because a controller that tries to send a 1 but sees a 0 knows it has lost arbitration.</li>
+</ul>
+<wavegen name="i2c_start">The start of an I²C transaction. The 1-bit periods are set by SCL; each data bit must be stable while SCL is high.</wavegen>
+<p>The rising edges are slow, set by the pull-up resistors and the bus capacitance, which is what limits I²C's speed and the number of devices on a bus.</p>
+
+<h3>Choosing an interface</h3>
+<grid>Property | UART | SPI | I²C
+Wires (besides ground) | 2 (TX, RX) | 3 + one select per device | 2 (SDA, SCL)
+Clock | none: agreed bit rate | from the controller | from the controller
+Typical speed | 9.6 kbit/s to a few Mbit/s | 1 to 50+ Mbit/s | 0.1, 0.4 or 1 Mbit/s
+Devices | point to point | one controller, several selected peripherals | up to ~112 addressed devices
+Acknowledgment | no (optional parity) | no | yes, per byte
+Typical uses | consoles, GPS, Bluetooth modules, debugging | flash, SD cards, displays, fast converters | sensors, EEPROMs, configuration registers</grid>
+
+<h3>Summary</h3>
+<ul>
+<li>Datasheets specify voltage, current, polarity, timing and sequence; check generated timing against them.</li>
+<li>LCD 4-bit interface: RS selects command or data; each nibble is latched by an E strobe; row 0 at 0x80 + column, row 1 at 0xC0 + column.</li>
+<li>UART: start bit, data LSB first, stop bit; 8N1 is 10 bits per byte; UBRR = f/(16·baud) − 1; rates must match within a few percent.</li>
+<li>SPI: SCK, MOSI, MISO, SS′; full-duplex shift-register exchange; four clock modes; fast and simple.</li>
+<li>I²C: open-drain SDA and SCL with pull-ups; START, address + R/W, ACK, data, STOP; slower but only two wires for many devices.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Which LCD command moves the cursor to row 1, column 5? To row 0, column 0?</p></ask>
+<sol><p>Row 1: 0xC0 + 5 = <b>0xC5</b>. Row 0, column 0: <b>0x80</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How many signal wires (not counting ground) does each bus need to connect a microcontroller to three peripherals: UART, SPI, I²C?</p></ask>
+<sol><p>UART is point to point, so three separate links of <b>2 wires each</b> (or more UARTs). SPI: SCK, MOSI, MISO plus three selects: <b>6</b>. I²C: <b>2</b>, shared by all three.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>At 9600 baud in 8N1 format, how long does one byte take, and how many bytes per second can be sent?</p></ask>
+<sol><p>10 bits/9600 bit/s = <b>1.04 ms</b> per byte; <b>960 bytes/s</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>List the bits on the TX line, in time order, when a UART sends the character 'K' (0x4B) in 8N1 format.</p></ask>
+<sol><p>0x4B = 0100 1011. Start <b>0</b>, then data LSB first <b>1, 1, 0, 1, 0, 0, 1, 0</b>, then stop <b>1</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Compute UBRR for 115,200 baud with a 16 MHz clock (normal speed mode), the actual baud rate, and the error.</p></ask>
+<sol><p>UBRR = 16 × 10⁶/(16 × 115,200) − 1 = 7.68 → <b>8</b>. Actual: 16 × 10⁶/(16 × 9) = <b>111,111 baud</b>, an error of <b>−3.5%</b>, too large to be reliable. AVR's double-speed mode (divisor 8) gives UBRR = 16 and 117,647 baud (+2.1%), and many designs use a 14.7456 MHz crystal so that standard baud rates divide exactly.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Why does the LCD need an E strobe at all, instead of latching whenever the data lines change? Use the byte 0x77 in 4-bit mode as the example.</p></ask>
+<sol><p>In 4-bit mode 0x77 is sent as the nibble 0111 twice. The second nibble leaves the data lines unchanged, so a device watching for changes would see only one nibble and lose synchronization. The same happens whenever the next value equals the current one. A separate strobe marks each transfer explicitly, independent of the data.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The E pulse must be at least 230 ns. Each set or clear instruction takes 2 cycles at 16 MHz. How long is the pulse produced by set-then-clear, and how many <code>nop</code> instructions (1 cycle each) must be inserted?</p></ask>
+<sol><p>Set-then-clear: <b>125 ns</b>. Missing: 230 − 125 = 105 ns, which needs 2 cycles of 62.5 ns: <b>2 nops</b>, giving 250 ns. Repeating the 2-cycle set instruction once achieves the same.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An SPI controller sends 0xA5 to a peripheral whose shift register holds 0x3C. After 8 clock cycles, what does each side hold?</p></ask>
+<sol><p>The two 8-bit shift registers form a ring and have exchanged contents: the controller holds <b>0x3C</b> and the peripheral holds <b>0xA5</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An I²C temperature sensor has 7-bit address 0x48. What is the first byte after START for a write, and for a read? Who drives SDA during the ACK bit of that byte?</p></ask>
+<sol><p>The address is shifted left one place and the R/W bit appended: write <b>0x90</b>, read <b>0x91</b>. The <b>sensor</b> (the receiver of the address byte) pulls SDA low during the ninth clock to acknowledge.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Estimate the maximum payload throughput of I²C at 400 kHz and of SPI at 10 MHz, ignoring software overhead.</p></ask>
+<sol><p>I²C sends 9 clocks per byte (8 data + ACK): at most 400,000/9 ≈ <b>44 KB/s</b>, less after START, address and STOP. SPI sends 8 clocks per byte: 10 × 10⁶/8 = <b>1.25 MB/s</b>.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A UART receiver resynchronizes on the start bit's falling edge and samples each bit at its middle. Estimate the largest total baud-rate mismatch between transmitter and receiver that still samples the stop bit correctly in an 8N1 frame.</p></ask>
+<sol><p>The stop bit's middle is 9.5 bit periods after the start edge. The accumulated timing error there must stay below half a bit: 9.5 × e &lt; 0.5 → e &lt; <b>5.3%</b> total mismatch. Edge detection uncertainty and the need for margin for slow edges and noise reduce the practical budget to about 2% per side.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An NTC thermistor (10 kΩ at 25 °C) is the lower resistor of a divider with a fixed 10 kΩ resistor to 5 V, read by a 10-bit ADC with a 5 V reference. Give the reading at 25 °C and the formula for the thermistor resistance from a reading A. What does a reading of 682 mean?</p></ask>
+<sol><p>At 25 °C the divider gives 2.5 V: A ≈ <b>512</b>. In general V = 5·R<sub>t</sub>/(R<sub>t</sub> + 10k) and A = 1024·V/5, so <b>R<sub>t</sub> = 10 kΩ × A/(1024 − A)</b>. For A = 682: 10k × 682/342 ≈ <b>19.9 kΩ</b>, about twice the 25 °C value, meaning the sensor is cold: NTC resistance rises as temperature falls, and for a typical part (β ≈ 3950 K) this is about 10 °C. A table or the β equation converts resistance to temperature.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Choose an interface for each: (a) eight temperature sensors read once per second; (b) an ADC delivering 16-bit samples at 1 MS/s; (c) a debug console to a PC. Justify each choice.</p></ask>
+<sol><p>(a) <b>I²C</b>: two wires for all eight addressed sensors, and the data rate is tiny. (b) <b>SPI</b>: it needs at least 16 Mbit/s of payload, so SPI at 20 MHz or more (or a parallel or LVDS interface) is required; I²C is far too slow. (c) <b>UART</b>: universally supported by USB-to-serial adapters and terminal programs, point to point, and speed is not critical.</p></sol>
+</prob>
+</practice>
+</module>

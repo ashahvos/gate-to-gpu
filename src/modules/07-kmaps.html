@@ -1,0 +1,164 @@
+<module id="kmaps" num="7" part="2" title="Karnaugh maps and logic minimization" short="K-maps" pre="canonical" blurb="A systematic way to find minimal two-level logic: map layouts for two to five variables, prime and essential prime implicants, product-of-sums minimization from the zeros, don't-care conditions, multiple-output design, glitches caused by missing consensus terms, and how tools do the same job at scale.">
+
+<p>A canonical SOP is correct but usually far larger than necessary. Minimization finds an equivalent expression with as few product terms and literals as possible. Algebra can do it, but offers no guarantee you have found the minimum. A <b>Karnaugh map</b> (K-map) is a rearrangement of the truth table in which the algebraic simplification X·Y + X·Y′ = X (theorem T10) becomes a visual pattern, so that for up to four or five variables you can find a minimal two-level expression reliably by inspection.</p>
+
+<h3>The idea: adjacency</h3>
+<p>Two minterms that differ in exactly one variable combine into a single term with that variable removed: A′B′C + A′BC = A′C. A K-map arranges the cells of the truth table so that <b>cells that are next to each other differ in exactly one variable</b>. To make that work, the row and column labels follow Gray code order, 00, 01, 11, 10, rather than counting order, because in counting order 01 and 10 would be neighbors while differing in two bits.</p>
+<diagram name="kmap" args='{"n":3,"label":"Three-variable K-map layout with minterm indices"}'>A three-variable map. Each cell holds F for one row of the truth table; the small number is the minterm index. Cells 2 and 0 in the top row are adjacent even though they sit at opposite ends: the map wraps around, so its left and right edges touch.</diagram>
+<p>For four variables, both rows and columns are Gray-coded, and the map wraps in both directions, as if drawn on a torus. The four corner cells (0, 2, 8, 10) are mutually adjacent. Every cell of an n-variable map has exactly n neighbors, one for each variable that could be flipped.</p>
+
+<h3>Groups and what they mean</h3>
+<p>A <b>group</b> (loop) is a rectangle of cells, wrapping allowed, whose size is a power of two: 1, 2, 4, 8 or 16 cells. A group of 2<sup>k</sup> cells in an n-variable map corresponds to a product term of n − k literals: the variables that are constant across the group appear in the term (uncomplemented if the constant is 1, complemented if 0), and the k variables that change are eliminated.</p>
+<def term="Implicant">
+<p>A product term that is 1 only where the function is 1 (or don't care). On a K-map, any valid group that covers only 1s and Xs.</p>
+</def>
+<def term="Prime implicant">
+<p>An implicant that cannot be enlarged: removing any literal from it would make it cover a 0. On a map, a group that is not contained in any larger valid group.</p>
+</def>
+<def term="Essential prime implicant">
+<p>A prime implicant that is the only prime covering some 1 of the function. Every minimal SOP must contain all of the essential prime implicants.</p>
+</def>
+<key>
+<p>A minimal SOP uses only prime implicants (a non-prime group can always be enlarged to drop a literal), includes every essential prime implicant, and covers the remaining 1s with as few additional primes as possible.</p>
+</key>
+
+<h3>The procedure</h3>
+<ol class="steps">
+<li>Fill in the map: 1 for each minterm, X for each don't care, 0 elsewhere.</li>
+<li>For every 1, find the largest group or groups containing it. These are the prime implicants. Look especially at isolated 1s and at wrap-around and corner groups, which are the easiest to miss.</li>
+<li>Mark the essential primes: a 1 covered by exactly one prime makes that prime essential. Include all of them.</li>
+<li>Cover any remaining 1s with the fewest primes, preferring larger ones. If several choices tie, the function has more than one minimal form.</li>
+<li>Write one product term per chosen group and OR them.</li>
+</ol>
+<ex title="A four-variable minimization">
+<p>Minimize F(A, B, C, D) = Σm(0, 1, 2, 5, 8, 9, 10).</p>
+<diagram name="kmap" args='{"n":4,"ones":[0,1,2,5,8,9,10],"loops":[[0,1,8,9],[0,2,8,10],[1,5]],"terms":["B′C′ (cells 0, 1, 8, 9)","B′D′ (corners 0, 2, 8, 10)","A′C′D (cells 1, 5)"],"result":"F = B′C′ + B′D′ + A′C′D","label":"Four-variable K-map with three groups"}'>Three prime implicants, all essential. The square 0, 1, 8, 9 wraps from the top row to the bottom row; the four corners form one group because the map wraps in both directions.</diagram>
+<ul>
+<li>Cells 0, 1, 8, 9: rows AB = 00 and 10 (B = 0 throughout, A changes) and columns CD = 00 and 01 (C = 0, D changes): <b>B′C′</b>. It is the only prime covering cell 9, so it is essential.</li>
+<li>Cells 0, 2, 8, 10 (the corners): B = 0 and D = 0 throughout: <b>B′D′</b>, essential because it alone covers 10.</li>
+<li>Cell 5 (0101) can pair only with cell 1 (0001): A = 0, C = 0, D = 1, so <b>A′C′D</b>, essential because it alone covers 5.</li>
+</ul>
+<p><b>F = B′C′ + B′D′ + A′C′D</b>: three terms and 7 literals, against seven 4-literal minterms (28 literals) in the canonical form.</p>
+</ex>
+<ex title="A map with two minimal answers">
+<p>F(A, B, C) = Σm(0, 1, 2, 5, 6, 7) has six prime implicants of two literals each (A′B′, A′C′, B′C, BC′, AC, AB) and no essential ones: every 1 is covered by exactly two primes. Such a map is called <b>cyclic</b>. Picking any prime forces the rest, and there are two minimal covers:</p>
+<p><b>F = A′B′ + BC′ + AC</b> or <b>F = A′C′ + B′C + AB</b>. Both have three terms and six literals. When you check an answer against a solution, a different-looking result can still be minimal.</p>
+</ex>
+
+<h3>Product of sums from the zeros</h3>
+<p>Grouping the 0s instead of the 1s gives a minimal SOP for F′, and De Morgan turns it into a minimal POS for F. The shortcut: read each group of 0s as a <b>sum</b> term in which a variable that is constant 0 appears uncomplemented and a variable that is constant 1 appears complemented (the opposite of the SOP rule).</p>
+<ex title="POS of the same function">
+<p>For Σm(0, 1, 2, 5, 8, 9, 10) the zeros are 3, 4, 6, 7, 11, 12, 13, 14, 15. Three groups cover them: 3, 7, 11, 15 (C = 1, D = 1) gives <b>(C′ + D′)</b>; 4, 6, 12, 14 (B = 1, D = 0) gives <b>(B′ + D)</b>; 12, 13, 14, 15 (A = 1, B = 1) gives <b>(A′ + B′)</b>.</p>
+<p>F = (A′ + B′)(B′ + D)(C′ + D′). It has three sums and six literals, one literal fewer than the minimal SOP, so for this function the POS form is slightly cheaper. In general you minimize both and keep whichever costs less in the target technology.</p>
+</ex>
+
+<h3>Don't-care conditions</h3>
+<p>Some input combinations never occur, or their output does not matter. Mark them X. Each X may be treated as 1 if that makes a group larger, or as 0 otherwise; you never have to cover an X.</p>
+<ex title="BCD digit greater than 6">
+<p>A 4-bit input ABCD holds a BCD digit (0 to 9). Output F = 1 when the digit is greater than 6, that is for 7, 8 and 9. Codes 10 to 15 can never occur, so they are don't cares.</p>
+<diagram name="kmap" args='{"n":4,"ones":[7,8,9],"dcs":[10,11,12,13,14,15],"loops":[[8,9,10,11,12,13,14,15],[7,15]],"terms":["A (eight cells, A = 1)","BCD (cells 7, 15)"],"result":"F = A + BCD","label":"BCD greater-than-6 detector with don’t cares"}'>Using the don't cares, the 1s at 8 and 9 join the whole A = 1 half of the map, and 7 pairs with 15. Without the don't cares, the answer would be AB′C′ + A′BCD, with seven literals instead of four.</diagram>
+</ex>
+<warn>
+<p>Using a don't care as a 1 in one group does not make it a 1. Do not add groups whose only purpose is to cover Xs, and do not assume the circuit's actual output for a don't-care input is either value: whatever the final equation gives is what the hardware will do if that input ever appears, which matters if "impossible" inputs can occur at power-up or after a fault.</p>
+</warn>
+
+<h3>Five and six variables</h3>
+<p>A five-variable map is drawn as two four-variable maps side by side, one for each value of the extra variable. Cells in the same position of the two maps are adjacent (they differ only in that variable), so a group may consist of matching groups in both maps.</p>
+<diagram name="kmap5" args='{"ones":[0,2,8,10,5,16,18,24,26,21],"loops0":[[0,2,8,10],[5]],"loops1":[[16,18,24,26],[21]]}'>Matching groups in both halves combine. The corner groups together form an eight-cell group, C′E′ (variable A disappears), and cells 5 and 21 together form B′CD′E.</diagram>
+<p>Six variables need four maps in a 2 × 2 arrangement. Beyond that, maps become impractical, and minimization is done by algorithm.</p>
+
+<h3>Designing multiple outputs</h3>
+<p>A circuit with several output bits is designed one output at a time, each with its own map, and shared terms are then identified so one gate can serve several outputs.</p>
+<ex title="A 3-bit decrementer">
+<p>Input X = X2X1X0, output Z = X − 1 modulo 8 (so 0 − 1 = 7). Writing the table and reading each column:</p>
+<truth h="X2 X1 X0 | Z2 Z1 Z0">0 0 0 | 1 1 1; 0 0 1 | 0 0 0; 0 1 0 | 0 0 1; 0 1 1 | 0 1 0; 1 0 0 | 0 1 1; 1 0 1 | 1 0 0; 1 1 0 | 1 0 1; 1 1 1 | 1 1 0</truth>
+<p><b>Z0 = X0′</b>. <b>Z1</b> = Σm(0, 3, 4, 7), which is 1 when X1 = X0: <b>Z1 = (X1 ⊕ X0)′</b>. <b>Z2</b> = Σm(0, 5, 6, 7) = <b>X2X1 + X2X0 + X2′X1′X0′</b>: the map shows two pairs (5, 7) and (6, 7) plus the isolated cell 0.</p>
+</ex>
+<ex title="A 3-bit squarer">
+<p>Input A = A2A1A0 (0 to 7), output B = A², which needs 6 bits (7² = 49). The squares are 0, 1, 4, 9, 16, 25, 36, 49. Column by column:</p>
+<p><b>B0 = A0</b> (odd numbers have odd squares). <b>B1 = 0</b> always (every square is 0 or 1 modulo 4, so bit 1 is never set). <b>B2 = A1A0′</b> (rows 2 and 6). <b>B3 = A2′A1A0 + A2A1′A0 = A0(A2 ⊕ A1)</b> (rows 3 and 5). <b>B4 = A2A1′ + A2A0</b> (rows 4, 5, 7). <b>B5 = A2A1</b> (rows 6 and 7).</p>
+<p>Two outputs need no gates at all, which is typical of arithmetic functions and worth noticing before drawing six maps.</p>
+</ex>
+<tool name="kmap"/>
+
+<h3>Glitches: hazards in two-level logic</h3>
+<p>The minimal expression computes the right <i>steady-state</i> value, but real gates have delay, and during a transition the output can briefly take the wrong value. A <b>static-1 hazard</b> is a momentary 0 on an output that should stay 1 while one input changes; a <b>static-0 hazard</b> is the reverse, and a <b>dynamic hazard</b> is an output that should change once but bounces.</p>
+<ex title="The consensus term removes a static-1 hazard">
+<p>F = A·B′ + B·C with A = 1 and C = 1. When B falls from 1 to 0, F should stay 1: before the change BC = 1, after it AB′ = 1. But B′ comes through an inverter, so the AB′ term turns on later than BC turns off.</p>
+<wave>{"end":40,"grid":[20],"shade":[[24,27,"glitch",3]],"signals":[{"n":"B","v":[[0,1],[20,0]]},{"n":"B′","v":[[0,0],[23,1]]},{"n":"B·C","v":[[0,1],[22,0]]},{"n":"A·B′","v":[[0,0],[25,1]]},{"n":"F","v":[[0,1],[24,0],[27,1]],"c":3}],"cap":"Inverter delay 3, AND and OR delay 2 time units. For 3 units both product terms are 0, and F drops to 0.","alt":"Static-1 hazard waveform"}</wave>
+<diagram name="kmap" args='{"n":3,"ones":[3,4,5,7],"loops":[[4,5],[3,7],{"m":[5,7],"dash":true}],"terms":["A·B′","B·C","A·C (consensus, redundant)"],"result":"F = AB′ + BC + AC is hazard-free","label":"K-map showing a hazard between two adjacent groups and the consensus group that covers it"}'>The hazard appears exactly where two adjacent 1s (cells 5 and 7) are covered by different groups and no single group covers both. Adding the redundant consensus group A·C, which spans the boundary, keeps one term at 1 throughout the transition.</diagram>
+</ex>
+<p>A two-level SOP circuit is free of static-1 hazards for single-input changes if every pair of adjacent 1s is covered by some common product term. In synchronous designs this rarely matters, because flip-flops sample their inputs only after everything has settled (<ref to="timing"/>). It matters a great deal for any signal whose glitches are seen: asynchronous resets, clock enables and gated clocks, and outputs that leave the chip.</p>
+
+<h3>Beyond K-maps</h3>
+<p>The <b>Quine-McCluskey</b> method performs the same steps in tabular form: list minterms grouped by number of 1s, repeatedly combine pairs that differ in one bit to generate all prime implicants, then solve the covering problem with a prime implicant chart. It is exact and mechanical, but the covering step is NP-hard, so its run time explodes for many variables. Production tools use heuristics instead: <b>Espresso</b> finds near-minimal two-level covers quickly, and modern synthesis works mostly on multi-level logic, factoring and restructuring for area, delay and power together.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>K-maps use Gray-code order so that adjacent cells differ in one variable; maps wrap at the edges.</li>
+<li>A group of 2<sup>k</sup> cells eliminates k variables.</li>
+<li>Minimal SOP = all essential primes + the fewest other primes covering the rest.</li>
+<li>Group 0s for POS; variables constant at 1 appear complemented in the sum term.</li>
+<li>Don't cares may be used as 1 or 0, whichever helps, and never need covering.</li>
+<li>Adjacent 1s covered by different groups can glitch; the consensus term fixes it.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Why are K-map rows and columns labeled 00, 01, 11, 10 rather than 00, 01, 10, 11?</p></ask>
+<sol><p>So that any two side-by-side cells differ in exactly one variable (Gray-code order). That adjacency is what lets a group eliminate the variable that changes across it. In counting order, 01 and 10 would sit next to each other while differing in two variables.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>In a 4-variable map, how many literals does a group of 8 cells produce? A group of 2? Which group sizes are allowed?</p></ask>
+<sol><p>A group of 2<sup>k</sup> cells leaves 4 − k literals: 8 cells (k = 3) → <b>1 literal</b>; 2 cells → <b>3 literals</b>. Allowed sizes are powers of two: 1, 2, 4, 8, 16.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What is the difference between a prime implicant and an essential prime implicant?</p></ask>
+<sol><p>A prime implicant is a group that cannot be made larger. An essential prime implicant is a prime that is the <b>only</b> prime covering at least one 1, so every minimal cover must include it.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Minimize F(A, B, C) = Σm(1, 3, 5, 7) and F(A, B, C) = Σm(0, 4, 2, 6).</p></ask>
+<sol><p>Σm(1, 3, 5, 7) is every row with C = 1: <b>F = C</b>. Σm(0, 2, 4, 6) is every row with C = 0: <b>F = C′</b> (the columns BC = 00 and BC = 10 wrap around to form a group of 4).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Minimize the 3-input majority function F = Σm(3, 5, 6, 7).</p></ask>
+<sol><p>Cell 7 pairs with each of 3, 5 and 6: groups {3, 7} = BC, {5, 7} = AC, {6, 7} = AB. Each is essential (it alone covers 3, 5 or 6 respectively). <b>F = AB + AC + BC</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>In a 4-variable map, what term does the group of cells 2, 6, 10, 14 give? And cells 0, 4, 8, 12?</p></ask>
+<sol><p>2, 6, 10, 14 = 0010, 0110, 1010, 1110: C = 1, D = 0 throughout → <b>CD′</b> (the whole CD = 10 column). 0, 4, 8, 12: C = 0, D = 0 → <b>C′D′</b> (the CD = 00 column).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Find a minimal POS for F(A, B, C) = Σm(2, 3, 5, 7) by grouping zeros.</p></ask>
+<sol><p>Zeros: 0, 1, 4, 6. Groups: {0, 1} (A = 0, B = 0) → (A + B); {4, 6} (A = 1, C = 0) → (A′ + C). <b>F = (A + B)(A′ + C)</b>. Expanding gives A′B + AC (+ BC, redundant), matching the minimal SOP of the prime detector.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Minimize F(A, B, C, D) = Σm(1, 3, 7, 11, 15) + d(0, 2, 5). Are there several minimal answers?</p></ask>
+<sol><p>The column CD = 11 (3, 7, 11, 15) gives <b>CD</b>, essential. Cell 1 remains. It can join {0, 1, 2, 3} using don't cares 0 and 2 → <b>A′B′</b>, or {1, 3, 5, 7} using don't care 5 → <b>A′D</b>. Two minimal answers: <b>F = CD + A′B′</b> or <b>F = CD + A′D</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A colleague claims F = A′B + BC′ + AC is a minimal SOP for F(A, B, C) = Σm(2, 3, 5, 6, 7). Check the claim.</p></ask>
+<sol><p>The claimed expression covers A′B → {2, 3}, BC′ → {2, 6}, AC → {5, 7}: all five 1s, so it is <b>correct</b>. But it is not minimal: the map has primes <b>B</b> (cells 2, 3, 6, 7) and AC (5, 7). B is essential for 3 and 6, AC for 5, giving <b>F = B + AC</b>, two terms and three literals instead of three terms and six. The colleague missed that the four cells with B = 1 form a single group.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Minimize F(A, B, C, D) = Σm(0, 2, 5, 7, 8, 10, 13, 15).</p></ask>
+<sol><p>Corners 0, 2, 8, 10 → <b>B′D′</b>. Cells 5, 7, 13, 15 (B = 1, D = 1, A and C change) → <b>BD</b>. <b>F = B′D′ + BD = (B ⊕ D)′</b>, an XNOR of B and D. Recognizing XOR patterns (checkerboards) saves gates.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Design a circuit that takes a BCD digit ABCD and outputs 1 when it is a multiple of 3 (0, 3, 6 or 9). Use don't cares for 10 to 15.</p></ask>
+<sol><p>Ones: 0, 3, 6, 9; don't cares 10–15. Groups: 9 with 11, 13, 15 (don't cares) → <b>AD</b>; 3 with 11 → <b>B′CD</b>; 6 with 14 → <b>BCD′</b>; 0 is isolated (its neighbors 1, 2, 4, 8 are all 0) → <b>A′B′C′D′</b>. F = AD + B′CD + BCD′ + A′B′C′D′. Checking alternatives: 3 could also pair with 7? No, 7 is a 0. This cover is minimal.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using the 3-bit squarer from the text, explain without a map why B1 (the 2s bit of A²) is always 0.</p></ask>
+<sol><p>If A is even, A = 2k and A² = 4k², a multiple of 4, so bits 1 and 0 are 0. If A is odd, A = 2k + 1 and A² = 4k² + 4k + 1 = 4k(k + 1) + 1, which is 1 more than a multiple of 4, so bit 1 is 0 and bit 0 is 1. Either way <b>B1 = 0</b> and <b>B0 = A0</b>.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>F(A, B, C, D) = Σm(0, 1, 2, 3, 4, 6, 8, 9, 12, 14). Find a minimal SOP and identify which primes are essential.</p></ask>
+<sol><p>Primes: <b>A′B′</b> (0, 1, 2, 3), <b>B′C′</b> (0, 1, 8, 9), <b>D′</b>? Check D = 0 cells: 0, 2, 4, 6, 8, 10, 12, 14; 10 is not a 1, so no. <b>A′D′</b> (0, 2, 4, 6), <b>BD′</b> (4, 6, 12, 14), <b>C′D′</b> (0, 4, 8, 12). Essentials: B′C′ (only prime covering 9), A′B′ (only one covering 3), BD′ (only one covering 14). These cover 0, 1, 2, 3, 4, 6, 8, 9, 12, 14: everything. <b>F = A′B′ + B′C′ + BD′</b>, three terms, six literals; A′D′ and C′D′ are primes that are not needed.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>The asynchronous reset of a flip-flop is driven by R = A·B′ + B·C. Explain the risk, and fix it without changing R's steady-state truth table.</p></ask>
+<sol><p>With A = 1 and C = 1, R should stay 1 when B changes, but in the B: 1 → 0 transition the B·C term can drop before A·B′ rises, giving a brief 0 on R: a <b>static-1 hazard</b>. More dangerous is the case where R should stay 0: any glitch to 1 on an asynchronous reset resets the flip-flop immediately, even between clock edges. Here the steady-state hazard is fixed by adding the consensus term <b>A·C</b>: R = AB′ + BC + AC has the same truth table and no static-1 hazard. The robust fix is architectural: generate reset from a flip-flop (a registered, glitch-free signal) rather than from combinational logic.</p></sol>
+</prob>
+</practice>
+</module>

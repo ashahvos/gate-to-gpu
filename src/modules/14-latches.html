@@ -1,0 +1,161 @@
+<module id="latches" num="14" part="4" title="Latches and flip-flops" short="Latches and flip-flops" pre="blocks,cmos" blurb="How a circuit remembers: bistable feedback, the SR and D latches, the edge-triggered flip-flop built from two latches, its setup, hold and clock-to-Q times, resets, and the T and JK variants.">
+
+<p>Every circuit so far has been <b>combinational</b>: its outputs are a function of its present inputs only. A counter, a processor register or a state machine must also depend on the past. Circuits with memory are <b>sequential</b>, and they are built from one new kind of element: a cell that stores a bit and changes it only when told to.</p>
+<def term="Sequential circuit">A circuit whose outputs depend on the history of its inputs as well as their present values. The history is summarized by the circuit's state, stored in memory elements (latches or flip-flops) and fed back into its logic.</def>
+
+<h3>Why feedback through logic is not enough</h3>
+<p>Consider the most obvious way to build a counter: feed an adder's output back to its own input, so that the value computes value + 1 forever. Two things go wrong. First, the adder's output bits settle at different times (the low bit after a gate or two, the high bits after the carry ripples), so the input sees a mixture of old and new bits and computes nonsense from them; the circuit races around the loop as fast as the gates allow, with no meaningful sequence of values. Second, nothing sets the starting value.</p>
+<p>The fix is to break the loop with an element that answers three questions: <b>how</b> to hold a bit indefinitely, <b>when</b> to accept a new value (all bits at the same instant, after the logic has settled), and <b>how to initialize</b> it at power-up. The rest of this module builds that element.</p>
+
+<h3>Storing a bit: the bistable element</h3>
+<p>A wire that is left unconnected after being charged does hold its voltage for a while, but the charge leaks away through junctions and gate oxides in milliseconds or less. (DRAM is built exactly this way and must be refreshed for that reason; see <ref to="memory"/>.) A permanent store must actively restore its own value, and the simplest circuit that does so is a pair of inverters connected in a loop.</p>
+<diagram name="bistable">Two cross-coupled inverters. Each sees the other's output as its input, so a 1 on Q forces Q′ to 0, which reinforces Q = 1.</diagram>
+<p>Plotting both inverters' transfer curves on the same axes shows why the loop holds a value. A consistent state must lie on both curves, and they cross three times. At the two outer crossings, small disturbances are corrected: noise that moves Q slightly is amplified back to the rail. Those points are <b>stable</b> and store 0 or 1. The middle crossing, where both nodes sit near V<sub>DD</sub>/2, is also a consistent state, but any disturbance grows: it is <b>metastable</b>, like a ball balanced on a hilltop. A circuit can be pushed into that point by an input that changes at exactly the wrong moment, and it then takes an unpredictable time to fall to one side. This becomes important in <ref to="timing"/>.</p>
+<p>The loop has no input, so it can only hold whatever value it happened to start with. Writing a new value needs either drivers strong enough to overpower the inverters (the approach of an SRAM cell) or a switch that opens the loop while the new value is applied (the approach of a latch).</p>
+
+<h3>The SR latch</h3>
+<p>Replacing each inverter with a NOR gate adds an input to each side of the loop. A NOR with one input at 0 behaves as an inverter, so with both new inputs at 0 the circuit is the bistable loop. Raising S (set) forces Q′ to 0 and therefore Q to 1; raising R (reset) forces Q to 0.</p>
+<diagram name="sr_latch">The NOR SR latch. The inputs are active-high; a NAND version (the S′R′ latch) has active-low inputs.</diagram>
+<truth h="S R | Q*">0 0 | Q; 0 1 | 0; 1 0 | 1; 1 1 | x</truth>
+<p>Here Q* denotes the next value of Q and the row 0 0 | Q means "unchanged". The combination S = R = 1 is excluded: it forces both outputs to 0, so Q′ is no longer the complement of Q, and if both inputs return to 0 at the same moment the two gates race to set the loop, possibly entering the metastable state. Circuits that use an SR latch must guarantee S and R are never 1 together.</p>
+<prac><p>An SR latch is the classic hardware debouncer for a single-pole, double-throw switch. The switch's common terminal grounds either the S′ or the R′ input of a NAND latch. When the contact bounces, it only touches and leaves the same terminal, which re-asserts the same input; the latch changes state on the first touch and ignores the rest. It never sees both inputs active, because the switch cannot touch both terminals at once.</p></prac>
+
+<h3>The D latch</h3>
+<p>The SR latch's two inputs and forbidden combination are awkward. A <b>D latch</b> has a data input D and an enable C (also called G, gate, or clock). While C = 1 the latch is <b>transparent</b>: Q follows D. When C falls to 0 the latch becomes <b>opaque</b> and holds the value D had at that moment.</p>
+<truth h="C D | Q*">0 0 | Q; 0 1 | Q; 1 0 | 0; 1 1 | 1</truth>
+<p>Functionally a D latch is a 2-to-1 multiplexer whose output is fed back to one of its own inputs: with C = 1 it selects D, and with C = 0 it selects its own output, which then circulates and holds.</p>
+<diagram name="d_latch_mux">The D latch as a mux with feedback. In CMOS the mux is two transmission gates (<ref to="cmos"/>), and inverters in the loop restore the levels, about ten transistors in total.</diagram>
+<p>Built from an SR latch, the gating is S = D·C and R = D′·C: when C = 1 exactly one of S and R is 1, setting or resetting according to D, and when C = 0 both are 0 and the latch holds. Because R is derived from D′, the forbidden combination can never occur.</p>
+
+<h3>Why a latch is not enough</h3>
+<p>Try to build the counter again with a register of D latches between the adder's output and its input. While the latches are transparent, the loop is closed again: the new value passes through, round the adder, and back to the latch inputs, and if C stays high long enough it races around repeatedly. The circuit works only if the enable pulse is shorter than the loop delay yet long enough for the latches to capture data, a window that varies with temperature and voltage and is impossible to guarantee. The same thing happens in a shift register made of latches: during the transparent phase a bit races through every stage at once instead of moving one position.</p>
+<p>What is needed is an element that takes a snapshot of its input at one instant and never lets its input and output be connected at the same time.</p>
+
+<h3>The edge-triggered D flip-flop</h3>
+<p>Two D latches in series, enabled on opposite phases of the clock, have exactly that property. While the clock is low, the first (<b>leader</b> or master) latch is transparent and follows D, while the second (<b>follower</b> or slave) is opaque and holds Q. When the clock rises, the leader closes, capturing D as it was just before the edge, and the follower opens, passing that captured value to Q. While the clock stays high, D can change freely: the leader is closed. There is never a transparent path from D to Q.</p>
+<diagram name="dff_ms">A positive-edge-triggered D flip-flop. Swapping the clock phases (inverter on the follower instead) gives a negative-edge-triggered flip-flop.</diagram>
+<eq c>Q* = D   (sampled at each rising clock edge; Q holds between edges)</eq>
+<wavegen name="latch_ff">The same D drives a latch (transparent while CLK = 1) and a rising-edge flip-flop. The latch output follows every change of D during the high phases, including short pulses; the flip-flop output changes only just after rising edges, to the value D had at the edge.</wavegen>
+<diagram name="ff_symbols">Standard symbols. The triangle marks an edge-triggered clock input; a bubble on it means the falling edge.</diagram>
+<p>With flip-flops, a shift register works: at each clock edge every flip-flop samples its neighbor's output as it was <i>before</i> the edge, because each flip-flop's output only changes a short time (the clock-to-Q delay) after the edge, too late to be seen by its neighbor at the same edge. Each bit therefore moves exactly one position per clock. The counter works too: the adder sees a stable input for a whole clock period, has time to settle, and its result is captured all at once at the next edge.</p>
+<tool name="latchlab"/>
+
+<h3>Flip-flop timing parameters</h3>
+<p>A flip-flop's edge is not infinitely sharp in practice. Three parameters describe its timing:</p>
+<ul>
+<li><b>Setup time</b> t<sub>setup</sub>: D must be stable this long <i>before</i> the clock edge, so the leader latch's loop has settled to the new value before it closes.</li>
+<li><b>Hold time</b> t<sub>hold</sub>: D must remain stable this long <i>after</i> the edge, because the leader takes a moment to close fully (the clock reaches its transmission gates through internal inverters).</li>
+<li><b>Clock-to-Q delay</b> t<sub>clk→Q</sub>: after the edge, Q takes this long to show the new value. Datasheets give a maximum (for speed calculations) and a minimum or contamination value (for hold calculations).</li>
+</ul>
+<wavegen name="ff_timing">The setup and hold window around the edge. If D changes inside the window, the flip-flop may capture either value, or become metastable.</wavegen>
+<p>These three numbers, together with the delays of the logic between flip-flops, determine the maximum clock frequency of a synchronous design and whether it works at any frequency at all (hold violations). <ref to="timing" full/> develops the constraints.</p>
+
+<h3>Initialization: set, reset and clear</h3>
+<p>At power-up each flip-flop's loop settles to an arbitrary value, so every sequential system needs a way to force a known starting state. Flip-flops offer two kinds of reset:</p>
+<ul>
+<li>An <b>asynchronous</b> clear (or preset) input acts immediately, without waiting for a clock edge, and overrides D and the clock. It works even if the clock is not running yet, which is why it is common for power-on reset.</li>
+<li>A <b>synchronous</b> reset is just logic in front of D, for example an AND gate that forces D to 0 when RESET = 1. It takes effect at the next clock edge, like any other data.</li>
+</ul>
+<wavegen name="resets">Two flip-flops with D = 1 receive the same reset pulse between clock edges. The synchronous one clears at the next edge; the asynchronous one clears at once. Both reload D at the first edge after reset is released.</wavegen>
+<warn><p>An asynchronous reset is asynchronous on its way out too. If it is released close to a clock edge, some flip-flops may leave reset one cycle earlier than others, or go metastable. The standard practice is to assert reset asynchronously but release it synchronously, using a reset synchronizer (<ref to="timing"/>).</p></warn>
+
+<h3>Other flip-flop types</h3>
+<p>The D flip-flop is universal: every other type is a D flip-flop with logic in front of D. Two variants still appear in textbooks, interview questions and some older parts:</p>
+<grid>Type | Behavior | Characteristic equation | Built from a D flip-flop
+D | load D | Q* = D | —
+T (toggle) | T = 1 inverts Q, T = 0 holds | Q* = T ⊕ Q | D = T ⊕ Q
+JK | J sets, K resets, J = K = 1 toggles | Q* = J·Q′ + K′·Q | D = J·Q′ + K′·Q</grid>
+<p>A T flip-flop with T = 1 toggles on every edge, dividing the clock frequency by two with a 50% duty cycle, the basis of ripple counters (<ref to="registers"/>). The JK flip-flop removes the SR latch's forbidden case by defining J = K = 1 as toggle. When designing state machines with these types, the <b>excitation table</b> gives the inputs needed for each transition; for a JK flip-flop: 0 → 0 needs J = 0, K = x; 0 → 1 needs J = 1, K = x; 1 → 0 needs J = x, K = 1; 1 → 1 needs J = x, K = 0.</p>
+
+<h3>Analyzing a sequential circuit</h3>
+<p>Given a circuit of flip-flops and gates, its behavior follows from a mechanical procedure. Because Q holds for a whole cycle, everything combinational can be evaluated once per cycle:</p>
+<ol>
+<li>Write the Boolean equation for every flip-flop's D input and every output, in terms of the current Q values and the inputs.</li>
+<li>For each clock cycle, evaluate those equations with the current Q values and that cycle's inputs.</li>
+<li>At the clock edge, each Q takes the D value just computed. Repeat.</li>
+</ol>
+<ex title="Tracing a two-flip-flop circuit">
+<p>A circuit has D<sub>1</sub> = X + Q<sub>1</sub>·Q<sub>0</sub>, D<sub>0</sub> = X·Q<sub>1</sub> and output F = Q<sub>1</sub>·Q<sub>0</sub>. It starts at Q<sub>1</sub>Q<sub>0</sub> = 00 and receives X = 1, 1, 0, 1, 0, 0 in successive cycles.</p>
+<grid cls="mono">Cycle | Q1 Q0 | X | D1 = X + Q1Q0 | D0 = X·Q1 | F = Q1Q0
+0 | 0 0 | 1 | 1 | 0 | 0
+1 | 1 0 | 1 | 1 | 1 | 0
+2 | 1 1 | 0 | 1 | 0 | 1
+3 | 1 0 | 1 | 1 | 1 | 0
+4 | 1 1 | 0 | 1 | 0 | 1
+5 | 1 0 | 0 | 0 | 0 | 0</grid>
+<p>Each row's D values become the next row's Q values. The output depends only on the state, so it is valid for the whole cycle: a Moore-style output (<ref to="fsm"/>).</p>
+</ex>
+
+<h3>Summary</h3>
+<ul>
+<li>Cross-coupled inverters store a bit with two stable states and one metastable state.</li>
+<li>SR latch: S sets, R resets, S = R = 1 forbidden. D latch: transparent while C = 1, holds while C = 0.</li>
+<li>Latches in a feedback loop race while transparent; an edge-triggered flip-flop (two latches on opposite clock phases) samples D only at the clock edge: Q* = D.</li>
+<li>Setup and hold times define a window around the edge where D must be stable; clock-to-Q is the output delay.</li>
+<li>Asynchronous resets act immediately; synchronous resets act at the next edge. Release resets synchronously.</li>
+<li>T: Q* = T ⊕ Q. JK: Q* = JQ′ + K′Q. Both are D flip-flops with logic in front.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Complete the sentence for each element: "While the clock or enable is 1, its output ___; it changes only ___."</p><p>(a) a D latch with active-high enable (b) a rising-edge D flip-flop</p></ask>
+<sol><p>(a) The latch's output <b>follows D</b> while C = 1 and <b>holds</b> while C = 0; it can change any time C is 1. (b) The flip-flop's output <b>holds</b> while the clock is 1 (and while it is 0); it changes <b>only just after a rising edge</b>, to the value D had at the edge.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>A NOR SR latch has Q = 0. The inputs then go S R = 10, 00, 01, 00, 10, 10. What is Q after each step?</p></ask>
+<sol><p>10 sets: <b>1</b>; 00 holds: <b>1</b>; 01 resets: <b>0</b>; 00 holds: <b>0</b>; 10 sets: <b>1</b>; 10 again: <b>1</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How do you make a T flip-flop from a D flip-flop? What does a T flip-flop with T = 1 do to a 100 MHz clock?</p></ask>
+<sol><p>Feed D = T ⊕ Q (an XOR of T with the flip-flop's own output). With T = 1, D = Q′ and the output toggles at every rising edge, producing a <b>50 MHz</b> square wave with a 50% duty cycle.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A clock has rising edges at t = 10, 30, 50 ns and is high for 10 ns after each. D is 0 until t = 14, 1 from 14 to 23, 0 from 23 to 27, and 1 after 27. Ignoring delays, what are the outputs of an active-high D latch and a rising-edge flip-flop at t = 25 and at t = 45?</p></ask>
+<sol><p>The latch is transparent during 10–20, 30–40 and 50–60. At t = 25 it is opaque, holding the value D had when C fell at t = 20: <b>1</b>. At t = 45 it holds the value from t = 40, when D was 1: <b>1</b>. The flip-flop samples at 10 (D = 0) and 30 (D = 1): at t = 25 it shows <b>0</b>, at t = 45 it shows <b>1</b>. The 4 ns low pulse on D (23–27) is seen by neither, because it occurs while the latch is opaque and away from the edges.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Give the gating logic that turns an SR latch into a D latch with enable C, and explain why the forbidden input combination cannot occur.</p></ask>
+<sol><p><b>S = D·C, R = D′·C.</b> S and R both 1 would require D and D′ both 1, which is impossible. When C = 0 both are 0 and the latch holds.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write the excitation table of a T flip-flop: for each transition Q → Q*, what must T be?</p></ask>
+<sol><p>0 → 0: T = 0. 0 → 1: T = 1. 1 → 0: T = 1. 1 → 1: T = 0. In short, <b>T = Q ⊕ Q*</b>: toggle exactly when the bit must change.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A two-bit circuit has D<sub>0</sub> = Q<sub>0</sub> ⊕ E and D<sub>1</sub> = Q<sub>1</sub> ⊕ (E·Q<sub>0</sub>). Starting from Q<sub>1</sub>Q<sub>0</sub> = 00, find the state after each of five edges with E = 1, 1, 0, 1, 1. What is the circuit?</p></ask>
+<sol><p>00 → (E=1) 01 → (E=1) 10 → (E=0) 10 → (E=1) 11 → (E=1) 00. It is a <b>2-bit counter with count enable E</b>: bit 0 toggles when enabled, and bit 1 toggles when enabled and bit 0 is 1, exactly the carry of an incrementer.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Implement a JK flip-flop with a D flip-flop and gates, and verify all four input combinations.</p></ask>
+<sol><p><b>D = J·Q′ + K′·Q.</b> J K = 00: D = Q (hold). 01: D = 0 (reset). 10: D = Q′ + Q = 1 (set). 11: D = Q′ (toggle).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Explain what happens in a NOR SR latch when S = R = 1 and then both inputs return to 0 at exactly the same time.</p></ask>
+<sol><p>With S = R = 1 both NOR outputs are 0, so Q = Q′ = 0. When both inputs drop together, each NOR sees inputs 0 and 0 and starts to drive its output to 1; whichever gate is slightly faster wins and forces the other back to 0. If they are evenly matched the loop can sit at the <b>metastable</b> point and oscillate or hover before resolving. The final state is <b>unpredictable</b>, which is why the combination is forbidden.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Four D latches, all enabled by the same clock, are chained in series as a would-be shift register. What happens to a value applied at the input during one high phase of the clock? What changes if they are replaced with flip-flops?</p></ask>
+<sol><p>While the clock is high all four latches are transparent, so the input propagates through every stage within a few gate delays: after one high phase all four outputs hold (roughly) the same value. The register does not shift. With flip-flops each stage samples its predecessor's <b>old</b> output at the edge, since the predecessor's new output appears only after t<sub>clk→Q</sub>, and the data moves exactly one stage per edge. (Latch-based designs can shift by alternating two non-overlapping clock phases between neighboring latches.)</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A counter built from a register, an incrementer and a mux has t<sub>clk→Q</sub> = 80 ps, incrementer delay 300 ps, mux delay 40 ps and t<sub>setup</sub> = 50 ps. What is its maximum clock frequency?</p></ask>
+<sol><p>T ≥ 80 + 300 + 40 + 50 = 470 ps, so f<sub>max</sub> = 1/470 ps ≈ <b>2.13 GHz</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A flip-flop has an asynchronous active-high CLR input and D = 1, clocked at rising edges every 20 ns starting at 10 ns. CLR is high from t = 24 to t = 33 ns. When is Q 0? What if the clear were synchronous instead?</p></ask>
+<sol><p>Asynchronous: Q falls at <b>t = 24</b> (plus a small delay) and stays 0 until the first edge after CLR is released, at <b>t = 50</b>. (At t = 30 the edge occurs while CLR is still active, so the clear wins.) Synchronous: Q falls at the edge at <b>t = 30</b> (CLR is 1 then) and returns to 1 at the edge at <b>t = 50</b>.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a circuit that outputs a one-cycle pulse whenever a synchronous input X changes from 0 to 1. Then modify it to detect any change of X.</p></ask>
+<sol><p>Store X in a flip-flop so that Q holds X's value from the previous cycle. A rising edge of X is "now 1, previously 0": <b>P = X·Q′</b>, which is 1 for exactly the one cycle in which X has risen but the flip-flop has not yet captured it. Any change: <b>P = X ⊕ Q</b>. (If X is asynchronous, synchronize it first with two flip-flops and apply the detector to the synchronized signal.)</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>In a positive-edge master-slave flip-flop, the master latch is transparent while the clock is low. Suppose D changes from 0 to 1 at a time when the clock is high and changes back to 0 before the clock falls. Does Q change? What if the pulse on D occurs while the clock is low and ends before the rising edge?</p></ask>
+<sol><p>Clock high: the master is opaque, so the pulse never enters the flip-flop; <b>Q does not change</b>. Clock low: the master follows the pulse but, since D is back to 0 before the edge, the master holds 0 when it closes; the slave passes 0, so <b>Q does not change</b> either. Only the value of D in the setup-and-hold window around the rising edge matters.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Three T flip-flops with T = 1 are chained so that each is clocked by the previous one's Q′ (the first by a 64 MHz clock). What frequencies appear at the three outputs, and what sequence do they count? What is the drawback compared with a synchronous counter?</p></ask>
+<sol><p>Each stage halves the frequency: <b>32 MHz, 16 MHz, 8 MHz</b>, and Q<sub>2</sub>Q<sub>1</sub>Q<sub>0</sub> counts up 0, 1, 2, …, 7. Because each stage is clocked by the previous one, the delays accumulate: after the edge that takes 011 to 100, the outputs pass through 010 and 000 before settling. Any logic decoding the count sees those glitches, and the settling time grows with the number of bits. A synchronous counter changes all bits together, one t<sub>clk→Q</sub> after the common edge (<ref to="registers"/>).</p></sol>
+</prob>
+</practice>
+</module>

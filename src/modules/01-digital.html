@@ -1,0 +1,191 @@
+<module id="digital" num="1" part="1" title="The digital abstraction" short="Digital abstraction" blurb="Why hardware represents information with two voltage bands, the four thresholds that make that reliable, how switches compute logic functions, how much information n bits can hold, and how time enters through gate delay and the clock.">
+
+<p>Every digital system rests on one decision: a continuously varying physical quantity, almost always a voltage, is interpreted as one of only two symbols, 0 and 1. That decision throws away most of the information a voltage could carry, and in exchange makes computation reliable, composable and cheap to build at enormous scale. This module covers the rules that make the decision work: the voltage thresholds that define a valid 0 and 1, the noise margins between them, the way each gate restores a degraded signal, how networks of switches compute logic functions, and how propagation delay and the clock bring time into the picture.</p>
+
+<h3>Analog and digital signals</h3>
+<p>A <b>signal</b> is a physical quantity whose value carries information. In electronics it is usually the voltage of a circuit node measured relative to a shared reference node called <b>ground</b> (0 V). How the value is interpreted is what separates analog from digital.</p>
+<def term="Analog signal">
+<p>A signal whose information is carried by its exact value. Every voltage in the allowed range has a distinct meaning, so any disturbance of the voltage changes the information it carries.</p>
+</def>
+<def term="Digital signal">
+<p>A signal whose range is divided into a small number of bands, each mapped to one symbol. A binary digital signal has two bands, read as 0 and 1, separated by a band of voltages that no valid signal may occupy. Small disturbances that keep the voltage inside its band do not change the information.</p>
+</def>
+<p>A microphone output, a thermistor divider and an audio line are analog: 0.731 V and 0.734 V mean different things. The output of a logic gate is digital: on a 3.3 V system, 3.1 V and 3.3 V both mean 1. The price is that each wire carries far less information (one bit instead of a precise value), so a digital system needs many wires or many time steps to move the same information. The benefit is that information survives noise, copying and long chains of processing without degrading, as long as no disturbance pushes a voltage across into another band.</p>
+<p>Two bands are used rather than three or ten because, for a fixed supply voltage, two bands give the widest possible separation between symbols, and because the circuit that decides between them can be as simple as one transistor that is either on or off. Some systems do use more levels where density matters more than margin: multi-level-cell flash stores 2 to 4 bits per cell as 4 to 16 charge levels, and fast serial links use PAM4 signaling (4 voltage levels, 2 bits per symbol). Both pay for the density with smaller margins and more complex receivers.</p>
+
+<h3>The four thresholds and noise margins</h3>
+<p>To make "a high voltage means 1" precise, every logic family specifies four voltages. Two are promises made by an <b>output</b> (the driver) and two are promises made by an <b>input</b> (the receiver).</p>
+<grid>Symbol | Belongs to | Meaning
+V<sub>OH</sub> | driver output | the <b>lowest</b> voltage the output is guaranteed to produce when it drives a 1
+V<sub>OL</sub> | driver output | the <b>highest</b> voltage the output is guaranteed to produce when it drives a 0
+V<sub>IH</sub> | receiver input | the <b>lowest</b> input voltage guaranteed to be read as 1
+V<sub>IL</sub> | receiver input | the <b>highest</b> input voltage guaranteed to be read as 0</grid>
+<p>An input voltage between V<sub>IL</sub> and V<sub>IH</sub> is in the <b>forbidden</b> (undefined) region: the receiver may read it as 0, as 1, or inconsistently, and a CMOS input held there draws extra current because both of its transistors are partly on. The exact switching point inside that band varies with temperature, supply voltage and manufacturing, which is why datasheets only guarantee behavior outside it.</p>
+<diagram name="logic_levels">The levels used by 5 V TTL-compatible logic. A valid output lands inside the receiver's accepted band with room to spare on both sides. That spare room is the <b>noise margin</b>: the largest disturbance a signal can pick up between driver and receiver and still be read correctly.</diagram>
+<p>The noise margins follow directly from the four thresholds:</p>
+<eq>NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub>          (margin for a 1)
+NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub>          (margin for a 0)</eq>
+<p>For the levels above, NM<sub>H</sub> = 2.4 − 2.0 = 0.4 V and NM<sub>L</sub> = 0.8 − 0.4 = 0.4 V. If both margins are positive, the driver's output is always inside what the receiver accepts. If either is negative, the two parts are not compatible without something between them, such as a level shifter or a pull-up resistor (<ref to="interfacing"/>).</p>
+<ex title="Checking two parts from different families">
+<p>Device A has V<sub>OH</sub> = 3.4 V, V<sub>OL</sub> = 0.5 V, V<sub>IH</sub> = 3.3 V, V<sub>IL</sub> = 1.0 V. Device B has V<sub>OH</sub> = 3.2 V, V<sub>OL</sub> = 0.6 V, V<sub>IH</sub> = 3.0 V, V<sub>IL</sub> = 0.7 V. Can A drive B, and can B drive A?</p>
+<p><b>A drives B.</b> Compare A's output guarantees with B's input requirements: NM<sub>H</sub> = 3.4 − 3.0 = 0.4 V and NM<sub>L</sub> = 0.7 − 0.5 = 0.2 V. Both positive, so this direction works, with the low state the weaker one.</p>
+<p><b>B drives A.</b> NM<sub>H</sub> = 3.2 − 3.3 = −0.1 V. A valid 1 from B can be as low as 3.2 V, which is below the 3.3 V that A needs to be sure it sees a 1. This direction fails even with zero noise. (NM<sub>L</sub> = 1.0 − 0.6 = 0.4 V is fine, but one failing margin is enough.)</p>
+<p>Compatibility is directional: always compare the <i>driver's</i> V<sub>OH</sub> and V<sub>OL</sub> with the <i>receiver's</i> V<sub>IH</sub> and V<sub>IL</sub>.</p>
+</ex>
+<warn>
+<p>Pairing the four numbers from the same device. V<sub>OH</sub> − V<sub>IH</sub> of a single chip says nothing about a link; a noise margin always pairs one device's output thresholds with another device's input thresholds. A second common slip is reversing the inequality for the low state: the driver's V<sub>OL</sub> must be <i>below</i> the receiver's V<sub>IL</sub>.</p>
+</warn>
+
+<h3>Restoration: why noise does not accumulate</h3>
+<p>Noise margins explain why a single link is reliable. The deeper reason digital systems scale to billions of gates is <b>restoration</b>: the output of a logic gate is not a copy of its input. The input only controls whether the output is connected to the supply rail or to ground, and the output voltage comes from that rail. A degraded input such as 2.6 V on a 5 V system (a valid but weak 1) therefore produces a full-strength output near 5 V, and the next gate receives a fresh, clean signal.</p>
+<diagram name="restore">A slow, attenuated and noisy input still produces clean output transitions, provided the input never sits in the band between V<sub>IL</sub> and V<sub>IH</sub>. Each gate in a chain starts again from full swing, so noise cannot build up stage after stage.</diagram>
+<p>Compare a chain of analog amplifiers. Each stage adds a little noise of its own, and nothing removes the noise from earlier stages; with independent noise of 1 mV rms per stage, a 1000-stage chain ends with about √1000 × 1 mV ≈ 32 mV rms of accumulated noise. A chain of 1000 logic gates with 0.4 V margins makes an error only if a single stage sees a disturbance larger than 0.4 V, which for 1 mV rms noise is a 400-standard-deviation event. This is the property that lets a processor push data through thousands of gate levels every nanosecond without losing it.</p>
+<deeper title="Where V_IL and V_IH come from">
+<p>Plot a gate's output voltage against its input voltage and you get its <b>voltage transfer characteristic</b> (VTC). A useful logic gate has a VTC that is flat near both rails and steep in the middle: small input changes near 0 or V<sub>DD</sub> barely move the output, while in the transition region the gain magnitude exceeds 1.</p>
+<diagram name="vtc">VTC of a buffer. V<sub>IL</sub> and V<sub>IH</sub> are conventionally taken where the slope is 1 in magnitude. Inputs below V<sub>IL</sub> produce outputs at or below V<sub>OL</sub>, inputs above V<sub>IH</sub> produce outputs at or above V<sub>OH</sub>, and because the curve is flat outside the shaded band, V<sub>OL</sub> &lt; V<sub>IL</sub> and V<sub>OH</sub> &gt; V<sub>IH</sub>: the margins are positive automatically.</diagram>
+<p>The requirement that the gain magnitude exceed 1 somewhere is what makes restoration possible: a gate with gain below 1 everywhere would shrink every signal it passed. <ref to="cmos"/> derives the VTC of the CMOS inverter, the circuit that sets these thresholds in nearly every digital chip today.</p>
+</deeper>
+
+<h3>Computing with switches</h3>
+<p>The simplest device that turns logic into hardware is a <b>controlled switch</b>: closed (conducting) when its control input is 1, open when it is 0. Connect switches between a voltage source and a lamp and the lamp computes a function of the controls.</p>
+<diagram name="switch_logic">The same inputs, A closed and B open, in two arrangements. Switches in <b>series</b> conduct only when both are closed, which is AND. Switches in <b>parallel</b> conduct when at least one is closed, which is OR.</diagram>
+<div class="cards">
+<div><h4>Series: AND</h4><truth h="A B | lamp">0 0 | 0; 0 1 | 0; 1 0 | 0; 1 1 | 1</truth></div>
+<div><h4>Parallel: OR</h4><truth h="A B | lamp">0 0 | 0; 0 1 | 1; 1 0 | 1; 1 1 | 1</truth></div>
+</div>
+<p>Series and parallel combinations nest: A in series with (B in parallel with C) conducts when A·(B + C) = 1. Given switches controlled by each variable and by its complement, a series-parallel network can implement any logic function. Claude Shannon showed this correspondence between relay circuits and Boolean algebra in 1937, and it is still the organizing idea of transistor-level design.</p>
+<p>In a chip, the switches are <b>MOSFETs</b>. An NMOS transistor conducts when its gate voltage is high; a PMOS transistor conducts when its gate voltage is low. One difference from the lamp circuit matters: a logic gate must actively drive its output to <i>both</i> values, so every CMOS gate has a network of switches that connects the output to the supply when the function is 1 and a complementary network that connects it to ground when the function is 0. <ref to="cmos"/> builds every gate this way.</p>
+<def term="Combinational logic">
+<p>Logic whose outputs depend only on the present values of its inputs. Given the same inputs it always produces the same outputs, after a short delay.</p>
+</def>
+<def term="Sequential logic">
+<p>Logic whose outputs depend on its present inputs and on stored state, which summarizes past inputs. It contains memory elements such as latches and flip-flops.</p>
+</def>
+
+<h3>Bits and the size of information</h3>
+<p>One binary digit, a <b>bit</b>, has 2 possible values. Two bits have 4 combinations (00, 01, 10, 11), three bits have 8, and in general each added bit doubles the count.</p>
+<key>
+<p><b>n bits can represent 2<sup>n</sup> distinct patterns.</b> To give a distinct code to each of N different things you need at least ⌈log₂ N⌉ bits, where ⌈ ⌉ means round up to the next integer.</p>
+</key>
+<p>Examples: 26 letters need ⌈log₂ 26⌉ = 5 bits (2⁴ = 16 is too few, 2⁵ = 32 is enough). One million items need 20 bits, since 2²⁰ = 1,048,576. A memory with 65,536 locations needs 16 address bits. Note that the bits only give each item a <i>distinct pattern</i>; what the pattern means is a separate decision, covered in <ref to="numbers"/>.</p>
+<grid>Group | Size | Patterns
+bit | 1 | 2
+nibble | 4 bits (one hex digit) | 16
+byte | 8 bits | 256
+word | the natural width of a processor's registers: 8 bits on an AVR microcontroller, 32 or 64 on most CPUs | 2<sup>32</sup> ≈ 4.29 × 10<sup>9</sup>, 2<sup>64</sup> ≈ 1.84 × 10<sup>19</sup></grid>
+<p>Bits within a group are numbered from the right starting at 0. Bit 0 is the <b>least significant bit</b> (LSB) and bit n − 1 is the <b>most significant bit</b> (MSB). Memory capacities usually use binary multiples: 1 KiB = 2¹⁰ = 1024 bytes, 1 MiB = 2²⁰ bytes, 1 GiB = 2³⁰ bytes. Storage vendors and communication rates use decimal multiples instead: 1 GB = 10⁹ bytes, 1 Gb/s = 10⁹ bits per second. The gap grows with size, which is why a "500 GB" drive appears as about 466 GiB.</p>
+
+<h3>Time: propagation delay and levels of logic</h3>
+<p>A gate's output does not change the instant its input does. The transistors must charge or discharge the capacitance of the wire and of every gate input connected to the output, and that takes time (<ref to="circuits"/> shows the RC behavior behind it).</p>
+<def term="Propagation delay">
+<p>t<sub>pd</sub>: the maximum time from an input change to the moment the output has settled at its new valid value. Its companion, the <b>contamination delay</b> t<sub>cd</sub>, is the minimum time from an input change until the output first starts to change.</p>
+</def>
+<wave>{"end":60,"grid":[10,16],"noTicks":false,"signals":[{"n":"A","v":[[0,0],[10,1],[40,0]]},{"n":"Y = A′","v":[[0,1],[16,0],[46,1]]}],"marks":[[10,"input changes"],[16,"output settles"]],"cap":"An inverter with t<sub>pd</sub> = 6 time units. The output follows the input, always 6 units late.","alt":"Inverter input and delayed output"}</wave>
+<p>Delays add along a path. If a signal passes through a NAND gate (15 ps), then a NOR gate (20 ps), then an inverter (8 ps), the path delay is 43 ps. The <b>levels of logic</b> of a circuit is the largest number of gates on any path from an input to an output; the path with the largest total delay is the <b>critical path</b>, and it determines how soon the circuit's outputs can be trusted after its inputs change. Reducing levels of logic, at the cost of more gates or larger gates, is one of the basic trade-offs in digital design (<ref to="canonical"/> and <ref to="arith"/> show examples).</p>
+
+<h3>Clocks and synchronous design</h3>
+<p>Most digital systems coordinate their storage elements with a <b>clock</b>, a square wave that alternates between 0 and 1 at a fixed rate. Registers sample their inputs only at clock edges, so all stored state changes at (nearly) the same instant, and between edges the combinational logic has time to settle.</p>
+<wave>{"end":100,"grid":[10,30,50,70,90],"shade":[[10,30,"period T = 20 ns"]],"signals":[{"n":"CLK","clk":[20,10]}],"cap":"A clock with period T = 20 ns, so frequency f = 1/T = 50 MHz. The rising edges (dashed) are where registers capture data. This clock is high for half of each period: a 50% duty cycle.","alt":"Clock waveform with period marked"}</wave>
+<ul>
+<li>The <b>period</b> T is the time for one full cycle; the <b>frequency</b> is f = 1/T, measured in hertz (cycles per second).</li>
+<li>The <b>rising edge</b> is the 0 → 1 transition and the <b>falling edge</b> is 1 → 0. Most designs capture data on rising edges.</li>
+<li>The <b>duty cycle</b> is the fraction of each period that the signal is high: a signal high for 2 ns of every 8 ns has a 25% duty cycle.</li>
+</ul>
+<grid cls="mono">Frequency | Period
+1 kHz | 1 ms
+1 MHz | 1 µs
+16 MHz | 62.5 ns
+100 MHz | 10 ns
+1 GHz | 1 ns
+2.5 GHz | 400 ps</grid>
+<key>
+<p>A synchronous circuit works only if every signal launched at one clock edge has settled before the next edge arrives. The clock period must therefore be longer than the slowest register-to-register path. <ref to="timing"/> turns this into exact setup and hold equations.</p>
+</key>
+<p>At high frequencies the physical size of a chip matters too. Light travels about 12 cm in 400 ps in vacuum, and on-chip wires carry signals far more slowly than that because of their resistance and capacitance, so a long wire can consume a large part of a clock period. This is one reason fast designs keep critical logic physically close together and why the clock itself is distributed through a carefully balanced tree of buffers.</p>
+
+<h3>Levels of abstraction</h3>
+<p>No one designs a chip with tens of billions of transistors by thinking about transistors. Hardware is designed as a stack of layers, each of which hides the details of the one below behind a simpler contract. The digital abstraction in this module is one such contract: above it, a wire carries a 0 or a 1 and nothing else.</p>
+<grid>Layer | Unit of design | Covered in
+Devices | transistors, wires, capacitance | <ref to="cmos"/>, <ref to="circuits"/>
+Circuits | CMOS gates, latches, memory cells | <ref to="cmos"/>, <ref to="memory"/>
+Logic | gates, Boolean functions | <ref to="boolean"/> to <ref to="kmaps"/>
+Register-transfer level | adders, muxes, registers, state machines | <ref to="blocks"/> to <ref to="fsm"/>, <ref to="verilog"/>
+Microarchitecture | datapaths, pipelines, caches | <ref to="datapath"/> to <ref to="caches"/>
+Instruction set | instructions, registers, memory model | <ref to="datapath"/>
+System and software | programs, interrupts, drivers | <ref to="mcu"/> to <ref to="devices"/></grid>
+<p>Abstractions leak. A noise margin violated by a long cable, a gate delay that breaks a timing constraint, or a hot chip that slows down are all lower layers showing through. Much of hardware engineering consists of knowing when an abstraction can be trusted and when it cannot.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>A binary digital signal maps two voltage bands to 0 and 1 with a forbidden band between them.</li>
+<li>V<sub>OH</sub> and V<sub>OL</sub> are output guarantees; V<sub>IH</sub> and V<sub>IL</sub> are input requirements. NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub> and NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub>, always pairing a driver with a receiver.</li>
+<li>Gates restore signals to full swing, so noise does not accumulate through long chains of logic.</li>
+<li>Switches in series compute AND and in parallel compute OR; transistors are voltage-controlled switches.</li>
+<li>n bits give 2<sup>n</sup> patterns; N items need ⌈log₂ N⌉ bits.</li>
+<li>Gate delays add along a path; the critical path sets how long a circuit takes to settle, and the clock period must exceed it.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Which of these are digital signals? (a) the voltage across a thermistor in a thermostat, (b) the output of a logic gate, (c) the sound-pressure signal from a microphone, (d) the voltage on one data line of a memory bus.</p></ask>
+<sol><p><b>(b) and (d).</b> A gate output and a bus data line are interpreted only as 0 or 1. The thermistor voltage and the microphone signal carry information in their exact values, so they are analog. (The thermostat may later <i>convert</i> its analog voltage to a digital number with an ADC.)</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Which two of V<sub>OH</sub>, V<sub>OL</sub>, V<sub>IH</sub>, V<sub>IL</sub> are guarantees made by a driver, and which two are requirements of a receiver? For each, say whether it is a minimum or a maximum.</p></ask>
+<sol><p>Driver guarantees: <b>V<sub>OH</sub></b> is the minimum voltage of a driven 1, and <b>V<sub>OL</sub></b> is the maximum voltage of a driven 0. Receiver requirements: <b>V<sub>IH</sub></b> is the minimum input voltage read as 1, and <b>V<sub>IL</sub></b> is the maximum input voltage read as 0.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How many distinct patterns do 12 bits have? How many bits are needed to give each of 1000 items its own code?</p></ask>
+<sol><p>2¹² = <b>4096</b> patterns. For 1000 items: 2⁹ = 512 is too few and 2¹⁰ = 1024 is enough, so <b>10 bits</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A logic family has V<sub>OH</sub> = 2.7 V, V<sub>OL</sub> = 0.5 V, V<sub>IH</sub> = 2.0 V and V<sub>IL</sub> = 0.8 V. Compute both noise margins for one gate of this family driving another. Which logic state is more vulnerable to noise?</p></ask>
+<sol><p>NM<sub>H</sub> = 2.7 − 2.0 = <b>0.7 V</b>; NM<sub>L</sub> = 0.8 − 0.5 = <b>0.3 V</b>. The <b>low state</b> is more vulnerable: a disturbance of just over 0.3 V can push a driven 0 into the undefined band.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 5 V CMOS receiver needs V<sub>IH</sub> = 3.5 V and V<sub>IL</sub> = 1.5 V. It is driven by a TTL output with V<sub>OH</sub> = 2.4 V and V<sub>OL</sub> = 0.4 V. Is the connection reliable? If not, which state fails?</p></ask>
+<sol><p>NM<sub>L</sub> = 1.5 − 0.4 = 1.1 V, fine. NM<sub>H</sub> = 2.4 − 3.5 = <b>−1.1 V</b>: a valid TTL high can be far below what the CMOS input needs, so the <b>high state fails</b>. Common fixes are a pull-up resistor to 5 V on the line (which raises the high level when the TTL output stops pulling up), or a receiver from a TTL-compatible CMOS family (such as 74HCT) whose V<sub>IH</sub> is 2.0 V.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Using the two devices from the worked example (A: V<sub>OH</sub> 3.4, V<sub>OL</sub> 0.5, V<sub>IH</sub> 3.3, V<sub>IL</sub> 1.0; B: V<sub>OH</sub> 3.2, V<sub>OL</sub> 0.6, V<sub>IH</sub> 3.0, V<sub>IL</sub> 0.7, all in volts), can device B drive another device B? Give both margins.</p></ask>
+<sol><p>Pair B's outputs with B's inputs: NM<sub>H</sub> = 3.2 − 3.0 = <b>0.2 V</b>, NM<sub>L</sub> = 0.7 − 0.6 = <b>0.1 V</b>. Both positive, so yes, but with small margins; 0.1 V of noise on a low is enough to cause trouble.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A switch controlled by A is in series with a parallel pair of switches controlled by B and C, all between a source and a lamp. Write the Boolean expression for "the lamp is on" and list the input combinations that light it.</p></ask>
+<sol><p>Lamp = <b>A·(B + C)</b>. It is on when A = 1 and at least one of B, C is 1: ABC = 101, 110, 111.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A clock runs at 1.6 GHz. What is its period? A second signal is high for 2 ns and low for 6 ns, repeating. What are its frequency and duty cycle?</p></ask>
+<sol><p>T = 1 / 1.6 × 10⁹ = <b>625 ps</b>. The second signal has period 8 ns, so f = 1 / 8 ns = <b>125 MHz</b>, and it is high 2 of every 8 ns: a <b>25%</b> duty cycle.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A drive is sold as 500 GB (decimal gigabytes). How large is it in GiB? A memory is 16 GiB; how many address bits does it need if every byte has its own address?</p></ask>
+<sol><p>500 × 10⁹ / 2³⁰ = 500 × 10⁹ / 1,073,741,824 ≈ <b>465.7 GiB</b>. 16 GiB = 2⁴ × 2³⁰ = 2³⁴ bytes, so <b>34 address bits</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Circuit Y = NOT(NOR(NAND(A, B), C)) uses gates with t<sub>pd</sub> of 15 ps (NAND), 20 ps (NOR) and 8 ps (inverter). How many levels of logic does it have, what is the delay of each input-to-output path, and what is the critical path?</p></ask>
+<sol><p>Three levels (NAND, NOR, inverter). Paths from A and from B pass through all three gates: 15 + 20 + 8 = <b>43 ps</b>. The path from C skips the NAND: 20 + 8 = 28 ps. The critical paths are <b>A → Y and B → Y at 43 ps</b>; the output cannot be trusted until 43 ps after any input changes.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A gate input that is not connected to anything measures 1.6 V on a system with V<sub>IL</sub> = 0.8 V and V<sub>IH</sub> = 2.0 V. What is the gate's output, and what else goes wrong? How is this prevented?</p></ask>
+<hint><p>Think about what both transistors of a CMOS input stage do when the gate voltage is midway between the rails.</p></hint>
+<sol><p>The output is <b>undefined</b>: 1.6 V is in the forbidden band, so the gate may read 0 or 1 and can change its mind as the floating node drifts with nearby noise. In a CMOS input, a mid-level voltage turns both the pull-up PMOS and the pull-down NMOS partly on, so current flows straight from supply to ground and the gate wastes power and heats up. The fix is never to leave an input floating: tie unused inputs to a rail, and give any input that can be disconnected (a button, a connector) a <b>pull-up or pull-down resistor</b> that sets a defined default level.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using only switches, each controlled by one of A, A′, B or B′, draw (or describe) a network that conducts exactly when A ⊕ B = 1.</p></ask>
+<sol><p>A ⊕ B = A·B′ + A′·B. Build each product as a series pair and put the two pairs in parallel: (switch A in series with switch B′) <b>in parallel with</b> (switch A′ in series with switch B). The first branch conducts for A = 1, B = 0 and the second for A = 0, B = 1. That is four switches, the same count as the pull-down network of a CMOS XOR built from complemented inputs.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A register-to-register path contains 12 gates of 25 ps each, and the registers add 60 ps of their own overhead per cycle. What is the highest clock frequency at which this path works?</p></ask>
+<sol><p>The signal needs 12 × 25 + 60 = 360 ps per cycle, so T ≥ 360 ps and f<sub>max</sub> = 1 / 360 ps ≈ <b>2.78 GHz</b>. Shortening the path to 8 gates would allow T = 260 ps, about 3.85 GHz.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A signal crosses a cable on which up to 0.35 V of noise can couple, in either direction. The driver has V<sub>OH</sub> = 2.9 V and V<sub>OL</sub> = 0.45 V; the receiver has V<sub>IH</sub> = 2.3 V and V<sub>IL</sub> = 0.8 V. Is the link reliable? If not, give two different ways to fix it and say what each changes.</p></ask>
+<sol><p>NM<sub>H</sub> = 2.9 − 2.3 = 0.6 V, which covers 0.35 V of noise. NM<sub>L</sub> = 0.8 − 0.45 = <b>0.35 V</b>, exactly equal to the worst-case noise: zero remaining margin, so the link is <b>not reliable</b> (any extra disturbance, a supply droop or ground offset between the two ends causes errors). Fixes: (1) a driver with a lower V<sub>OL</sub>, for example one that sinks more current or is less loaded, which increases NM<sub>L</sub> directly; (2) a receiver with hysteresis (a Schmitt-trigger input), whose effective V<sub>IL</sub> for a falling input is lower but which will not chatter on noise; (3) reduce the noise itself with shielding, a shorter cable or differential signaling, where the receiver looks at the difference between two wires and common noise cancels.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Explain quantitatively why a chain of 1000 inverters reproduces its input faithfully while a chain of 1000 unity-gain analog amplifiers does not, assuming each stage adds independent noise of 2 mV rms and the logic family has 0.3 V noise margins.</p></ask>
+<sol><p><b>Analog chain:</b> nothing removes noise once added, and independent noise adds in power, so after 1000 stages the noise is √1000 × 2 mV ≈ <b>63 mV rms</b>, and the signal's exact value, which is the information, is corrupted. <b>Digital chain:</b> each inverter re-derives its output from the supply rails, so the noise seen at each input is only the noise added since the previous stage, about 2 mV rms. An error needs a single-stage excursion of 0.3 V, i.e. 150 standard deviations, an event with essentially zero probability. The digital chain therefore has a practically zero error rate; it still delays the signal, by 1000 × t<sub>pd</sub>.</p></sol>
+</prob>
+</practice>
+</module>

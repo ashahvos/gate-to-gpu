@@ -1,0 +1,171 @@
+<module id="analog" num="11" part="3" title="Diodes, op-amps and data conversion" short="Analog blocks" pre="circuits" blurb="The analog parts that sit at the edges of every digital system: diodes and LEDs, operational amplifiers and comparators, hysteresis, sampling and aliasing, analog-to-digital and digital-to-analog converters, and PWM as a cheap DAC.">
+
+<p>Digital logic interprets voltages as 0 and 1, but the world it measures and controls is continuous: temperatures, audio, light levels, motor speeds. The interface consists of a small set of analog building blocks. This module explains how each works and what limits it, at the depth needed to choose and use them correctly and to answer the analog questions that appear in hardware interviews.</p>
+
+<h3>Diodes</h3>
+<def term="Diode">A two-terminal device, usually a p-n junction, that conducts current easily in one direction (anode to cathode, forward bias) and blocks it in the other (reverse bias). The symbol's bar marks the cathode.</def>
+<p>A diode's current rises exponentially with forward voltage, I ≈ I<sub>S</sub>·e<sup>V/(nV<sub>T</sub>)</sup>, where V<sub>T</sub> = kT/q ≈ 26 mV at room temperature and n is between 1 and 2. Exponential means that every additional 60 to 120 mV multiplies the current by ten, so over the range of currents a circuit actually uses, the voltage across a conducting diode is nearly constant: about 0.6 to 0.7 V for silicon. That constant drop is the basis of the simple model "off below V<sub>F</sub>, a fixed V<sub>F</sub> drop when on."</p>
+<diagram name="diode_iv">Diodes look like open circuits below their forward voltage and like a nearly fixed voltage drop above it. The forward voltage of an LED depends on the semiconductor, which also sets its color.</diagram>
+<p>Uses that appear in digital hardware:</p>
+<ul>
+<li><b>LEDs</b> emit light when forward biased; V<sub>F</sub> is roughly 1.8 to 2.2 V for red, yellow and green and 2.8 to 3.4 V for blue and white. Because the voltage is nearly fixed while the current is not, an LED must have its current set by something else, normally a series resistor: R = (V<sub>supply</sub> − V<sub>F</sub>)/I.</li>
+<li><b>Protection:</b> every chip's I/O pin has clamp diodes to V<sub>DD</sub> and to ground that conduct if the pin is driven beyond the supply rails, steering electrostatic discharge and overvoltage into the supply.</li>
+<li><b>Flyback diodes</b> across inductive loads (<ref to="interfacing"/>), <b>reverse-polarity protection</b> in a supply input, and <b>rectifiers</b> that convert AC to DC.</li>
+<li><b>Zener diodes</b> are designed to break down at a specified reverse voltage and hold it, which makes them simple voltage references and clamps.</li>
+</ul>
+<warn><p>With a low supply, the LED resistor has little voltage to work with and the current becomes sensitive to V<sub>F</sub>. A blue LED (V<sub>F</sub> ≈ 3.0 V) on a 3.3 V supply leaves 0.3 V across the resistor; a ±0.1 V variation in V<sub>F</sub> changes the current by a third.</p></warn>
+
+<h3>The operational amplifier</h3>
+<def term="Operational amplifier">A differential amplifier with very high voltage gain (typically 10⁵ or more), very high input impedance and low output impedance. Its output is A·(V<sub>+</sub> − V<sub>−</sub>), limited to the range between its supply rails.</def>
+<p>On its own an op-amp is nearly useless as an amplifier: with a gain of 100,000, a 50 μV difference already drives the output to a rail. Its power comes from <b>negative feedback</b>, which connects the output back to the inverting input through a network that sets the gain. With negative feedback in place, two rules describe an ideal op-amp circuit:</p>
+<ol>
+<li>The output does whatever is necessary to make V<sub>−</sub> equal to V<sub>+</sub> (the inputs form a "virtual short").</li>
+<li>No current flows into either input.</li>
+</ol>
+<p>Every standard configuration follows from those rules and a line of algebra.</p>
+<diagram name="opamp_configs">The common op-amp circuits. All but the comparator use negative feedback.</diagram>
+<ul>
+<li><b>Voltage follower.</b> The output is wired directly to V<sub>−</sub>, so rule 1 gives v<sub>out</sub> = v<sub>in</sub>. A gain of 1 sounds pointless, but the input draws no current and the output can supply milliamps: a follower isolates a high-impedance source (a divider, a sensor) from the load that would otherwise drag it down.</li>
+<li><b>Non-inverting amplifier.</b> R<sub>f</sub> and R<sub>g</sub> divide the output, so V<sub>−</sub> = v<sub>out</sub>·R<sub>g</sub>/(R<sub>f</sub> + R<sub>g</sub>). Setting this equal to v<sub>in</sub> gives <b>v<sub>out</sub>/v<sub>in</sub> = 1 + R<sub>f</sub>/R<sub>g</sub></b>. The input impedance is essentially infinite.</li>
+<li><b>Inverting amplifier.</b> V<sub>+</sub> is grounded, so V<sub>−</sub> is held at 0 V (a virtual ground). The input current v<sub>in</sub>/R<sub>in</sub> cannot enter the op-amp, so it all flows through R<sub>f</sub>, and v<sub>out</sub> = −(v<sub>in</sub>/R<sub>in</sub>)·R<sub>f</sub>: <b>gain −R<sub>f</sub>/R<sub>in</sub></b>. The input impedance is R<sub>in</sub>.</li>
+<li><b>Summing amplifier.</b> Several input resistors into the same virtual ground add their currents: v<sub>out</sub> = −R<sub>f</sub>(v<sub>1</sub>/R<sub>1</sub> + v<sub>2</sub>/R<sub>2</sub> + …). With binary-weighted resistors this is a simple DAC; it is also an audio mixer.</li>
+<li><b>Integrator.</b> Replace R<sub>f</sub> with a capacitor and the output is −(1/RC)∫v<sub>in</sub>dt: the basis of active filters, ramp generators and integrating ADCs.</li>
+</ul>
+<p>Real op-amps add limits that matter in practice. The <b>gain-bandwidth product</b> (GBW) is roughly constant, so a circuit with gain G has a bandwidth of about GBW/G: a 1 MHz op-amp set for a gain of 100 is useful only to about 10 kHz. The <b>slew rate</b> caps how fast the output can change (V/μs), which limits large, fast signals. The output cannot reach the supply rails unless the part is specified "rail-to-rail", and small <b>offset voltages</b> (microvolts to millivolts) appear as errors after high gain.</p>
+
+<h3>Comparators and hysteresis</h3>
+<p>Without feedback, an op-amp or a dedicated <b>comparator</b> outputs high when v<sub>in</sub> &gt; V<sub>ref</sub> and low otherwise: a one-bit ADC. Comparators are built for this job, with fast recovery from saturation and outputs that match logic levels (often open-drain).</p>
+<p>A comparator alone has a problem with slow, noisy signals. Near the threshold, noise pushes the input back and forth across it, and the output chatters between 0 and 1, producing many edges where there should be one. The fix is <b>hysteresis</b>: two thresholds, a higher one (V<sub>T+</sub>) that the input must cross while rising and a lower one (V<sub>T−</sub>) for falling. Once the output switches, the threshold moves away from the input, and noise smaller than the gap V<sub>T+</sub> − V<sub>T−</sub> cannot switch it back. A comparator with hysteresis, built with a little positive feedback, is a <b>Schmitt trigger</b>.</p>
+<diagram name="schmitt">Hysteresis in action. The transfer curve on the right shows the two thresholds: the output state depends on the input and on where it came from, a simple form of memory.</diagram>
+<p>Schmitt-trigger inputs are everywhere in digital hardware: logic gates such as the 74HC14, reset and clock inputs, and the digital input buffers of many microcontrollers, including AVR parts. Combined with an RC filter they are the standard hardware debouncer for mechanical switches.</p>
+
+<h3>Sampling and aliasing</h3>
+<p>Before a continuous signal can be processed digitally it is sampled at a fixed rate f<sub>s</sub> and each sample is quantized. Sampling alone loses no information under one condition, the <b>Nyquist–Shannon sampling theorem</b>: a signal containing no frequencies at or above f<sub>s</sub>/2 (the <b>Nyquist frequency</b>) is completely determined by its samples. Audio is sampled at 44.1 or 48 kHz because human hearing extends to about 20 kHz.</p>
+<p>A component above f<sub>s</sub>/2 does not disappear: it produces exactly the same samples as a lower frequency and is indistinguishable from it. This is <b>aliasing</b>. A frequency f appears at |f − k·f<sub>s</sub>| for whichever integer k brings the result into the range 0 to f<sub>s</sub>/2.</p>
+<diagram name="aliasing">Undersampling. Every sample of the fast signal also lies on the slow one, so after sampling there is no way to tell which was present.</diagram>
+<p>Because aliasing cannot be undone after sampling, an analog <b>anti-aliasing filter</b>, a low-pass, must remove content above f<sub>s</sub>/2 before the ADC. Practical systems sample somewhat faster than twice the highest frequency of interest so the filter has room to roll off. The same effect explains why wagon wheels appear to turn backwards in film, and why sampling a slowly varying sensor at a rate synchronized to mains interference (50 or 60 Hz) can produce a phantom slow drift.</p>
+
+<h3>Analog-to-digital conversion</h3>
+<p>An n-bit ADC with reference voltage V<sub>ref</sub> divides its input range into 2ⁿ steps of width <b>1 LSB = V<sub>ref</sub>/2ⁿ</b> and outputs the step number. An ideal converter that rounds has a quantization error of at most ±½ LSB; one that truncates has an error between 0 and 1 LSB. For a 10-bit ADC with a 5 V reference, 1 LSB is 4.88 mV, and an input of V gives a code of about V/V<sub>ref</sub> × 1024.</p>
+<diagram name="adc_quant">An ideal 3-bit converter. More bits make the steps finer; the error never goes below the step size.</diagram>
+<p>Quantization error behaves like noise with an RMS value of LSB/√12. For a full-scale sine wave this gives a best-case <b>signal-to-quantization-noise ratio of about 6.02n + 1.76 dB</b>: each extra bit buys 6 dB. Real converters add other noise and distortion, so their performance is summarized by an <b>effective number of bits</b>, ENOB = (SINAD − 1.76)/6.02, where SINAD is the measured signal-to-noise-and-distortion ratio in dB.</p>
+<grid>Architecture | How it works | Typical use
+Flash | 2ⁿ − 1 comparators against a resistor ladder compare the input with every threshold at once; a priority encoder produces the code | Fastest (GHz), but comparator count doubles per bit, so usually ≤ 8 bits
+Successive approximation (SAR) | One comparator and an internal DAC run a binary search, deciding one bit per step from the MSB down | 8–18 bits, kHz to MHz; the ADC in most microcontrollers
+Sigma-delta (ΔΣ) | A 1-bit modulator runs far faster than needed; digital filtering trades that speed for resolution and pushes noise out of band | 16–24 bits at audio and lower rates
+Pipelined | A chain of low-resolution stages, each resolving a few bits and passing the residue on | 10–16 bits at tens to hundreds of MS/s</grid>
+<ex title="One SAR conversion">
+<p>A 4-bit SAR ADC with V<sub>ref</sub> = 3.2 V (1 LSB = 0.2 V) converts V<sub>in</sub> = 2.05 V. Each step sets the next bit to 1, converts the trial code with the internal DAC, and keeps the bit only if V<sub>in</sub> is at least the DAC voltage:</p>
+<grid cls="mono">Step | Trial code | DAC voltage | V_in ≥ DAC? | Result so far
+1 | 1000 | 1.6 V | yes | 1000
+2 | 1100 | 2.4 V | no | 1000
+3 | 1010 | 2.0 V | yes | 1010
+4 | 1011 | 2.2 V | no | 1010</grid>
+<p>The result 1010 (code 10, 2.0 V) is reached in n = 4 comparisons, one per bit, which is why SAR converters are compact and moderately fast.</p>
+</ex>
+<p>On the ATmega328P the ADC is a 10-bit SAR converter with an 8-input multiplexer. <code>ADMUX</code> selects the reference (REFS1:0; 01 = AVCC) and the channel (MUX3:0), and ADLAR left-adjusts the result so that <code>ADCH</code> alone holds the top 8 bits. <code>ADCSRA</code> enables the converter (ADEN), starts a conversion (ADSC, which reads 1 until the conversion finishes) and sets the ADC clock prescaler (ADPS2:0). Full 10-bit accuracy needs an ADC clock of 50 to 200 kHz, so a 16 MHz system clock is divided by 128 to give 125 kHz; a conversion takes 13 ADC clocks, about 104 μs.</p>
+<pre lang="c">void adc_init(void)
+{
+    ADMUX  = (1 << REFS0) | (1 << ADLAR);      // AVCC reference, left-adjusted result
+    ADCSRA = (1 << ADEN) | (7 << ADPS0);       // enable; prescaler 128 -> 125 kHz
+}
+
+uint8_t adc_sample(uint8_t channel)
+{
+    ADMUX = (ADMUX & 0xF0) | (channel & 0x0F);  // change channel, keep REFS and ADLAR
+    ADCSRA |= (1 << ADSC);                      // start one conversion
+    while (ADCSRA & (1 << ADSC)) { }            // ADSC clears when the result is ready
+    return ADCH;                                // top 8 of the 10 bits
+}</pre>
+<prac><p>One ADC pin can read several buttons. Each button connects a different point of a resistor ladder to the pin, so each produces a different voltage, and the software compares the reading against thresholds halfway between the expected values. LCD shields commonly read five buttons this way through a single analog input. The thresholds must leave margin for resistor tolerance and supply variation.</p></prac>
+
+<h3>Digital-to-analog conversion</h3>
+<p>The inverse problem, producing a voltage proportional to a binary number, has three common solutions.</p>
+<p><b>Binary-weighted resistors</b> feeding a summing amplifier (R, 2R, 4R, 8R, …) are simple in principle but need resistor values spanning a ratio of 2ⁿ⁻¹, all matched to better than 1 LSB, which is impractical beyond a few bits.</p>
+<p>The <b>R-2R ladder</b> uses only two resistor values. Analyze it one bit at a time (superposition), with the other bit inputs at 0 V. Looking toward the LSB end from any node, the ladder presents exactly 2R, because the termination 2R in parallel with a 2R leg is R, plus the next series R makes 2R again, and so on. The MSB's leg therefore forms a divider with the 2R behind it and contributes V<sub>ref</sub>/2 to the output; each step further from the output passes through one more halving divider, so the next bit contributes V<sub>ref</sub>/4, then V<sub>ref</sub>/8. The result is an exact binary weighting from two matched values.</p>
+<diagram name="r2r">An R-2R DAC driven directly from four logic outputs. The output must be buffered (an op-amp follower) if anything draws current from it.</diagram>
+<p><b>Pulse-width modulation (PWM)</b> needs no DAC hardware at all: a digital output switches between 0 and V<sub>DD</sub> at a fixed frequency, and the fraction of each period spent high, the duty cycle D, sets the average voltage D·V<sub>DD</sub>. A low-pass filter with a cutoff far below the PWM frequency extracts the average. For many loads no filter is needed: LEDs, heaters and motors respond to average power, and the eye or the load's own inertia does the filtering.</p>
+<diagram name="pwm_avg">PWM as a DAC. The trade-off is set by the filter: a lower cutoff gives less ripple but responds more slowly to changes in duty cycle.</diagram>
+<p>PWM resolution and frequency trade against each other: a counter clocked at f<sub>clk</sub> with N steps per period gives f<sub>PWM</sub> = f<sub>clk</sub>/N. With a 16 MHz clock, 8-bit PWM runs at 62.5 kHz, while 10-bit PWM runs at only 15.6 kHz. Timer configuration for PWM is in <ref to="interrupts"/>.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>A conducting diode drops about 0.7 V (silicon) or 2 to 3 V (LEDs); set LED current with a series resistor R = (V<sub>S</sub> − V<sub>F</sub>)/I.</li>
+<li>Op-amp with negative feedback: V<sub>+</sub> = V<sub>−</sub>, no input current. Follower gain 1, non-inverting 1 + R<sub>f</sub>/R<sub>g</sub>, inverting −R<sub>f</sub>/R<sub>in</sub>. Bandwidth ≈ GBW/gain.</li>
+<li>Comparators make 1-bit decisions; hysteresis (Schmitt trigger) prevents chatter on noisy, slow inputs.</li>
+<li>Sample above twice the highest frequency present; content above f<sub>s</sub>/2 aliases to |f − kf<sub>s</sub>| and must be filtered out first.</li>
+<li>n-bit ADC: LSB = V<sub>ref</sub>/2ⁿ; SQNR ≈ 6.02n + 1.76 dB. Flash is fastest, SAR is the microcontroller workhorse, sigma-delta gives the most bits.</li>
+<li>R-2R ladders and PWM with a low-pass filter are the common cheap DACs.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>An 8-bit ADC has a 5 V reference. What is 1 LSB, and what code (truncating) does a 2.0 V input produce?</p></ask>
+<sol><p>1 LSB = 5/256 = <b>19.5 mV</b>. Code = ⌊2.0/5 × 256⌋ = ⌊102.4⌋ = <b>102</b> (0x66).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What is the gain of a non-inverting amplifier with R<sub>f</sub> = 9 kΩ and R<sub>g</sub> = 1 kΩ? Of an inverting amplifier with R<sub>f</sub> = 47 kΩ and R<sub>in</sub> = 10 kΩ?</p></ask>
+<sol><p>Non-inverting: 1 + 9/1 = <b>10</b>. Inverting: −47/10 = <b>−4.7</b> (a 0.5 V input gives −2.35 V, if the supplies allow negative outputs).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What minimum sampling rate does the sampling theorem require for audio up to 20 kHz? Why do real systems use 44.1 or 48 kHz rather than exactly that?</p></ask>
+<sol><p>More than <b>40 kHz</b>. The extra margin lets a practical anti-aliasing filter pass 20 kHz while attenuating everything above 22 to 24 kHz; an ideal brick-wall filter at exactly f<sub>s</sub>/2 cannot be built.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 4-bit R-2R DAC with V<sub>ref</sub> = 3.3 V is given the code 1011. What is its output voltage?</p></ask>
+<sol><p>V<sub>out</sub> = 3.3 × 11/16 = <b>2.27 V</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>An ATmega328P reads 614 from its 10-bit ADC with AVCC = 5.0 V as the reference. What is the input voltage? What would the 8-bit left-adjusted ADCH value be?</p></ask>
+<sol><p>V = 614 × 5/1024 = <b>3.00 V</b>. ADCH holds the top 8 of 10 bits: 614 &gt;&gt; 2 = <b>153</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 30 kHz tone is sampled at 44.1 kHz with no anti-aliasing filter. At what frequency does it appear in the samples?</p></ask>
+<sol><p>|30 − 44.1| = <b>14.1 kHz</b>, which is inside the audible band and indistinguishable from a real 14.1 kHz tone.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>How many comparators does an 8-bit flash ADC need? How many comparison steps does an 8-bit SAR ADC take?</p></ask>
+<sol><p>Flash: 2⁸ − 1 = <b>255 comparators</b>, one conversion per clock. SAR: <b>8 steps</b> with a single comparator. Each extra bit doubles the flash converter but adds one step to the SAR.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Trace a 4-bit SAR conversion of 1.35 V with V<sub>ref</sub> = 3.2 V. Give each trial code and decision.</p></ask>
+<sol><p>LSB = 0.2 V. Trial 1000 (1.6 V): 1.35 &lt; 1.6 → 0. Trial 0100 (0.8 V): yes → 1. Trial 0110 (1.2 V): yes → 1. Trial 0111 (1.4 V): no → 0. Result <b>0110</b> = 6, representing 1.2 V (truncation error 0.15 V, less than 1 LSB).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What is the ideal SQNR of a 12-bit ADC? A 12-bit converter is measured with a SINAD of 62 dB. What is its ENOB?</p></ask>
+<sol><p>SQNR = 6.02 × 12 + 1.76 ≈ <b>74 dB</b>. ENOB = (62 − 1.76)/6.02 ≈ <b>10.0 bits</b>: the bottom two bits are effectively noise.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An op-amp has a gain-bandwidth product of 1 MHz. You need a gain of 100 for a signal with content up to 50 kHz. Does one stage work? What about two cascaded stages?</p></ask>
+<sol><p>One stage: bandwidth ≈ 1 MHz/100 = <b>10 kHz</b>, too low. Two stages of gain 10 each give 100 overall, each with bandwidth 1 MHz/10 = 100 kHz. Cascading two identical poles narrows the bandwidth to about 64% of one stage, roughly <b>64 kHz</b>, which works.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An inverting summing amplifier has R<sub>f</sub> = 10 kΩ and four inputs through 10 kΩ, 20 kΩ, 40 kΩ and 80 kΩ, each driven by a logic output at 0 V or 5 V. What is the output for the input pattern 1111? For 1010 (the 10 kΩ input first)? What property must the resistors have for this DAC to be accurate?</p></ask>
+<sol><p>v<sub>out</sub> = −10k(v<sub>3</sub>/10k + v<sub>2</sub>/20k + v<sub>1</sub>/40k + v<sub>0</sub>/80k). For 1111: −(5 + 2.5 + 1.25 + 0.625) = <b>−9.375 V</b>. For 1010: −(5 + 1.25) = <b>−6.25 V</b>. The resistors must be matched to a fraction of the smallest weight: the 10 kΩ resistor's error must be well under 1/8 of its value relative to the 80 kΩ one, and the spread grows as 2ⁿ⁻¹, which is why R-2R ladders replace this design beyond a few bits.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A slowly varying sensor signal has ±0.3 V of noise. A Schmitt trigger has thresholds V<sub>T+</sub> = 2.0 V and V<sub>T−</sub> = 1.0 V. Can the noise cause extra transitions? What is the minimum hysteresis for this noise level?</p></ask>
+<sol><p>Noise of ±0.3 V spans 0.6 V peak to peak, less than the 1.0 V hysteresis: once the output switches high at 2.0 V, the input would have to fall below 1.0 V, which noise around a level near 2.0 V cannot do. <b>No extra transitions.</b> The hysteresis must exceed the noise's peak-to-peak amplitude, <b>0.6 V</b>, with margin.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Five buttons share one ADC input. A 2 kΩ resistor pulls the input to 5 V; each button grounds a different point of a series ladder of 330 Ω, 620 Ω, 1 kΩ and 3.3 kΩ, so the buttons connect the input to ground through 0, 330, 950, 1950 and 5250 Ω. Compute the voltage and 10-bit ADC reading for each button and for no button, and choose decision thresholds.</p></ask>
+<sol><p>V = 5 × R<sub>b</sub>/(2000 + R<sub>b</sub>):</p>
+<grid cls="mono">Button | R to ground | Voltage | ADC (×1024/5)
+1 | 0 Ω | 0 V | 0
+2 | 330 Ω | 0.71 V | 145
+3 | 950 Ω | 1.61 V | 330
+4 | 1950 Ω | 2.47 V | 506
+5 | 5250 Ω | 3.62 V | 741
+none | open | 5 V | 1023</grid>
+<p>Thresholds halfway between neighbors: <b>72, 237, 418, 623, 882</b>. A reading below 72 is button 1, between 72 and 237 button 2, and so on. The midpoints maximize the tolerance to resistor and supply variation. Pressing two buttons at once registers as the one closest to the input on the ladder.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A blue LED with V<sub>F</sub> = 3.0 V ± 0.1 V is driven from 3.3 V through a resistor chosen for 5 mA. What is the resistor, and what range of current results? How would you drive it more consistently?</p></ask>
+<sol><p>R = (3.3 − 3.0)/0.005 = <b>60 Ω</b>. With V<sub>F</sub> = 2.9 V the current is 0.4/60 = 6.7 mA; with 3.1 V it is 0.2/60 = 3.3 mA: a <b>±33%</b> spread. Use a higher supply (5 V gives (2.0 ± 0.1)/400 Ω = 5 mA ± 5%), or a constant-current driver, which servos the current directly instead of relying on the headroom.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>With a 16 MHz timer clock, what PWM frequency results from 8-bit and from 10-bit fast PWM? You need a filtered DAC output with less than 1% ripple and want to settle within 1 ms. Which resolution can meet both with a first-order filter?</p></ask>
+<sol><p>8-bit: 16 MHz/256 = <b>62.5 kHz</b>. 10-bit: 16 MHz/1024 = <b>15.6 kHz</b>. Settling within 1 ms needs 5τ ≤ 1 ms, so τ ≤ 200 μs and f<sub>c</sub> ≥ 800 Hz. With f<sub>c</sub> = 800 Hz, a first-order filter attenuates the PWM fundamental by about f<sub>c</sub>/f<sub>PWM</sub>: 800/62,500 ≈ 1.3% at 8 bits but 800/15,600 ≈ 5% at 10 bits. Since the fundamental is at most about 64% of the 5 V swing, the 8-bit case gives roughly 0.8% ripple and meets both requirements; the 10-bit case cannot without a higher-order filter. Resolution, update rate and ripple trade against each other.</p></sol>
+</prob>
+</practice>
+</module>

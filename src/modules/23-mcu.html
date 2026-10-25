@@ -1,0 +1,191 @@
+<module id="mcu" num="23" part="6" title="Microcontrollers, GPIO and bit manipulation in C" short="Microcontrollers and GPIO" pre="datapath,interfacing,numbers" blurb="Programming hardware directly: what is inside a microcontroller, C integer types on an 8-bit machine, the DDR, PORT and PIN registers, the bit-manipulation idioms and the mistakes that break them, copying bit fields, and reading buttons with debouncing.">
+
+<p>A microcontroller puts a processor, memory and peripherals on one chip, and a program controls the hardware by reading and writing the peripherals' registers. Embedded C is mostly ordinary C, plus one essential skill: changing exactly the bits you mean to change in a register, and nothing else. This module uses the ATmega328P, the 8-bit AVR microcontroller on the Arduino Uno, programmed directly through its registers rather than through the Arduino library.</p>
+
+<h3>What is in a microcontroller</h3>
+<diagram name="mcu_block">A microcontroller. Every peripheral is controlled through a handful of memory-mapped registers.</diagram>
+<p>The ATmega328P has an 8-bit AVR core running at 16 MHz on the Uno, 32 KB of flash for the program, 2 KB of SRAM for data, and 1 KB of EEPROM for settings that must survive power-off. Program and data memories are separate (a Harvard architecture), so constant data placed in flash needs special access functions. There is usually no operating system: the program starts at reset and runs forever. It is compiled with avr-gcc into a binary image that a bootloader or programmer writes into flash.</p>
+
+<h3>C integer types on an 8-bit machine</h3>
+<p>C's built-in integer sizes depend on the platform. On AVR, <code>int</code> is only 16 bits (−32,768 to 32,767), so code that assumes 32-bit ints silently overflows. Embedded code therefore uses the fixed-width types from <code>&lt;stdint.h&gt;</code>:</p>
+<grid cls="mono">Type | Bits | Range
+uint8_t | 8 | 0 to 255
+int8_t | 8 | −128 to 127
+uint16_t | 16 | 0 to 65,535
+int16_t | 16 | −32,768 to 32,767
+uint32_t | 32 | 0 to 4,294,967,295
+int32_t | 32 | −2,147,483,648 to 2,147,483,647</grid>
+<p>Two rules of C arithmetic cause most surprises:</p>
+<ul>
+<li><b>Integer promotion:</b> operands smaller than <code>int</code> are converted to <code>int</code> before arithmetic. With <code>uint8_t a = 200, b = 100;</code> the expression <code>a + b</code> is the int 300; only assigning it back to a <code>uint8_t</code> truncates it to 300 − 256 = 44.</li>
+<li><b>Constants are int by default:</b> on AVR, <code>1 &lt;&lt; 15</code> overflows a 16-bit signed int and <code>1 &lt;&lt; 20</code> is undefined. Write <code>1UL &lt;&lt; 20</code> (unsigned long, 32 bits) when the result must be wider than 16 bits.</li>
+</ul>
+<p>Use <code>char</code> for text and <code>uint8_t</code>/<code>int8_t</code> for small numbers. A character is stored as its ASCII code: <code>'0'</code> is 0x30, so <code>'0' + 7</code> is the character <code>'7'</code>, while sending the number 7 to a display shows an unprintable control character (<ref to="numbers"/>).</p>
+
+<h3>GPIO: the DDR, PORT and PIN registers</h3>
+<p>The ATmega328P's general-purpose I/O pins are grouped into 8-bit ports B, C and D. Each port has three registers, and bit n of each register controls pin n of that port:</p>
+<grid>Register | Meaning of bit n
+DDRx (data direction) | 1 = pin is an output, 0 = input. All bits are 0 after reset, so every pin starts as an input.
+PORTx | If output: the value driven (1 = high, 0 = low). If input: 1 enables the internal pull-up resistor.
+PINx | Read: the current logic level on the pin, whether input or output. Writing 1 to a PIN bit toggles the corresponding PORT bit.</grid>
+<diagram name="gpio_pin">One pin's circuitry. The input path passes through a Schmitt trigger and a two-flip-flop synchronizer (<ref to="timing"/>), so PIN reflects the pin voltage about one clock cycle late.</diagram>
+<diagram name="uno_map">Uno pin labels and port bits. D13, the pin with the onboard LED, is PB5; the analog inputs A0–A5 are PC0–PC5, which also work as ordinary digital pins.</diagram>
+
+<h3>Changing one bit without disturbing the others</h3>
+<p>A register holds eight independent controls, so assigning a whole value (<code>PORTB = 0x20;</code>) changes all eight pins. To change one bit, read the register, modify the bit with a <b>mask</b>, and write it back. A mask is a constant with 1s in the bit positions of interest, written in hexadecimal (<code>0x20</code>) or built with a shift (<code>1 &lt;&lt; 5</code>, which the AVR headers let you write as <code>1 &lt;&lt; PB5</code>).</p>
+<diagram name="bitmask_ops">OR sets bits, AND with the complement clears them, XOR toggles them, and AND isolates them for testing.</diagram>
+<p>The reasoning behind each operation is the identity table of each operator: x | 1 = 1 and x | 0 = x; x &amp; 0 = 0 and x &amp; 1 = x; x ^ 1 = x′ and x ^ 0 = x. The mask's 1 bits select which positions are affected; its 0 bits leave the rest alone. The six recipes cover nearly all GPIO code:</p>
+<pre lang="c">DDRB  |=  (1 << PB4);          // make PB4 an output
+DDRB  &= ~(1 << PB4);          // make PB4 an input
+PORTB |=  (1 << PB4);          // drive PB4 high (or enable its pull-up if input)
+PORTB &= ~(1 << PB4);          // drive PB4 low (or disable its pull-up)
+if ((PINB & (1 << PB4)) != 0)  // PB4 reads 1
+if ((PINB & (1 << PB4)) == 0)  // PB4 reads 0
+PORTB ^=  (1 << PB4);          // toggle PB4</pre>
+<p>Several bits are handled at once by ORing shifted ones: <code>PORTD |= (1 &lt;&lt; 7) | (1 &lt;&lt; 2);</code> sets bits 7 and 2. For I/O registers in the low part of the address space, the compiler turns single-bit set and clear operations into the AVR's one-instruction <code>sbi</code> and <code>cbi</code>, which cannot be interrupted halfway (<ref to="interrupts"/>).</p>
+
+<h3>Bitwise versus logical operators, and precedence</h3>
+<p>C has two families of operators that look alike and behave very differently:</p>
+<ul>
+<li>Bitwise <code>&amp; | ^ ~</code> operate on each bit position independently and produce a number.</li>
+<li>Logical <code>&amp;&amp; || !</code> treat any nonzero value as true and produce 0 or 1.</li>
+</ul>
+<p>So <code>1 &amp;&amp; 2</code> is 1 but <code>1 &amp; 2</code> is 0; <code>!0x10</code> is 0 but <code>~0x10</code> is 0xEF (and, after promotion to int, nonzero, so <code>if (~x)</code> is true even for x = 1).</p>
+<p>Operator precedence is the other trap. From highest to lowest, the relevant groups are: <code>~ !</code> (unary), then <code>* / %</code>, <code>+ −</code>, shifts <code>&lt;&lt; &gt;&gt;</code>, comparisons <code>&lt; &gt; &lt;= &gt;=</code>, equality <code>== !=</code>, then <code>&amp;</code>, <code>^</code>, <code>|</code>, then <code>&amp;&amp;</code>, <code>||</code>, and finally assignment. Because <code>==</code> binds more tightly than <code>&amp;</code>, a missing pair of parentheses changes the meaning completely.</p>
+<warn>
+<p>The classic GPIO bugs:</p>
+<ul>
+<li><code>PORTB &amp;= (1 &lt;&lt; 3);</code> keeps bit 3 and <b>clears every other bit</b>. To clear bit 3, the mask must be complemented: <code>&amp;= ~(1 &lt;&lt; 3)</code>.</li>
+<li><code>PORTB |= (0 &lt;&lt; 3);</code> does nothing: 0 shifted anywhere is 0. ORing cannot clear bits, and ANDing cannot set them.</li>
+<li><code>if (PIND &amp; (1 &lt;&lt; 3) == 0)</code> parses as <code>PIND &amp; ((1 &lt;&lt; 3) == 0)</code>, which is <code>PIND &amp; 0</code>: always false. Parenthesize the AND.</li>
+<li><code>if ((PIND &amp; (1 &lt;&lt; 3)) == 1)</code> is never true: the masked value is 0 or 8, not 0 or 1. Compare with 0 (<code>!= 0</code> or <code>== 0</code>).</li>
+<li><code>PORTB = (1 &lt;&lt; 5);</code> when you meant <code>|=</code> turns off every other output on the port.</li>
+</ul>
+</warn>
+<tool name="bitfiddle"/>
+
+<h3>Copying a group of bits</h3>
+<p>A common task is to copy a multi-bit field from one place to another, for example to put a 4-bit value onto four output pins without changing the other four. Because OR can only make 1s and AND can only make 0s, the destination field must be cleared first and then ORed with the new value, after the new value has been shifted into position and masked to that field.</p>
+<diagram name="copy_bits">Copying bits 7–5 of PORTC into bits 5–3 of PORTB: shift right by 2, mask with 0x38, clear the field in PORTB, then OR.</diagram>
+<pre lang="c">PORTB &= ~0x38;                    // clear PB5..PB3
+PORTB |= (PORTC >> 2) & 0x38;      // bring in C7..C5 at positions 5..3
+
+// The general pattern, for a field of width w starting at bit s:
+//   mask = ((1 << w) - 1) << s;
+//   dest = (dest & ~mask) | ((value << s) & mask);</pre>
+<p>Doing it in two statements briefly exposes an intermediate value on the pins (the field cleared to 0). When that matters, compute the new value in a variable and write the register once.</p>
+
+<h3>Reading a button</h3>
+<p>A push button is normally wired between the pin and ground with the internal pull-up enabled, so it reads 1 when released and 0 when pressed (<ref to="interfacing"/>). Mechanical contacts do not close cleanly: they <b>bounce</b>, making and breaking contact several times over a few milliseconds.</p>
+<wavegen name="bounce">Contact bounce on press and release. Without debouncing, one press can be counted as several.</wavegen>
+<p>The simplest software debouncer waits a few milliseconds after a change and checks again, then waits for the release, so that one press is handled exactly once:</p>
+<pre lang="c">#include <avr/io.h>
+#include <util/delay.h>
+
+int main(void)
+{
+    DDRB  |= (1 << PB5);                     // LED on PB5 (Uno D13): output
+    DDRD  &= ~(1 << PD2);                    // button on PD2: input
+    PORTD |= (1 << PD2);                     // with pull-up: reads 0 when pressed
+
+    while (1) {
+        if ((PIND & (1 << PD2)) == 0) {      // looks pressed
+            _delay_ms(5);                    // let the bounce settle
+            if ((PIND & (1 << PD2)) == 0) {  // still pressed: a real press
+                PORTB ^= (1 << PB5);         // toggle the LED once
+                while ((PIND & (1 << PD2)) == 0) { }   // wait for release
+                _delay_ms(5);                // ignore release bounce
+            }
+        }
+    }
+}</pre>
+<p>This works but blocks: while it waits for the release, the program can do nothing else. <ref to="swfsm"/> restructures the same logic as a state machine that never blocks, and <ref to="interrupts"/> replaces busy-wait delays with timers.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>On AVR, <code>int</code> is 16 bits; use <code>uint8_t</code>, <code>int16_t</code>, <code>uint32_t</code> and suffixes such as <code>1UL</code>. Small types are promoted to int before arithmetic.</li>
+<li>DDRx sets direction (1 = output), PORTx sets the output value or the pull-up, PINx reads the pins.</li>
+<li>Set: <code>|= mask</code>. Clear: <code>&amp;= ~mask</code>. Toggle: <code>^= mask</code>. Test: <code>(reg &amp; mask) != 0</code>.</li>
+<li>Bitwise and logical operators differ; <code>==</code> binds tighter than <code>&amp;</code>, so parenthesize masks.</li>
+<li>Copy a field: clear the destination field, then OR in the shifted, masked source.</li>
+<li>Buttons bounce; debounce with a short delay and confirmation, and act once per press.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Write statements that make PD7–PD4 outputs driving 0 and PD3–PD0 inputs with pull-ups, assuming nothing else uses port D.</p></ask>
+<sol><p><code>DDRD = 0xF0;</code> (upper nibble output) and <code>PORTD = 0x0F;</code> (outputs low, pull-ups on the lower nibble). If other code shares the port, use <code>|=</code> and <code>&amp;=</code> with the same masks instead of plain assignment.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What is the value of each expression for x = 0x5A? (a) <code>x | 0x0F</code> (b) <code>x &amp; 0x0F</code> (c) <code>x ^ 0xFF</code> (d) <code>x &gt;&gt; 4</code> (e) <code>x &amp;&amp; 0x0F</code></p></ask>
+<sol><p>(a) <b>0x5F</b> (b) <b>0x0A</b> (c) <b>0xA5</b> (d) <b>0x05</b> (e) <b>1</b> (both operands nonzero).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>True or false: <code>PORTD &amp;= (3 &lt;&lt; 5);</code> clears bits 5 and 6 of PORTD.</p></ask>
+<sol><p><b>False.</b> 3 &lt;&lt; 5 = 0x60, so the AND keeps bits 5 and 6 and clears the other six. Clearing bits 5 and 6 needs <code>PORTD &amp;= ~(3 &lt;&lt; 5);</code>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why is <code>if ((PINC &amp; (1 &lt;&lt; 4)) == 1)</code> wrong, and what are two correct ways to write the test?</p></ask>
+<sol><p>The masked value is 0 or 16 (0x10), never 1, so the condition is never true. Correct: <code>if ((PINC &amp; (1 &lt;&lt; 4)) != 0)</code> or <code>if (PINC &amp; (1 &lt;&lt; 4))</code>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write one statement that toggles PB0 and PB1 together and one that sets PC2 and clears PC5 in a single write to PORTC.</p></ask>
+<sol><p><code>PORTB ^= (1 &lt;&lt; PB0) | (1 &lt;&lt; PB1);</code> and <code>PORTC = (PORTC &amp; ~(1 &lt;&lt; PC5)) | (1 &lt;&lt; PC2);</code>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>After <code>uint8_t x = 200; x = x + 100;</code>, what is x? What type and value does the expression <code>x + 100</code> have before it is assigned?</p></ask>
+<sol><p>x is promoted to int, so <code>x + 100</code> is an <b>int with value 300</b>. Storing it in a uint8_t keeps the low 8 bits: x = 300 − 256 = <b>44</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Extract bits 6–4 of PIND as a number from 0 to 7.</p></ask>
+<sol><p><code>(PIND &gt;&gt; 4) &amp; 0x07</code>: shift the field down to bit 0, then mask off the bits above it.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What does the condition <code>if (PIND &amp; 1 &lt;&lt; 3 == 0)</code> actually test? Rewrite it to test whether PD3 is 0.</p></ask>
+<sol><p>Shift binds tighter than <code>==</code>, which binds tighter than <code>&amp;</code>: it is <code>PIND &amp; ((1 &lt;&lt; 3) == 0)</code> = <code>PIND &amp; 0</code> = 0, <b>always false</b>. Correct: <code>if ((PIND &amp; (1 &lt;&lt; 3)) == 0)</code>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>On AVR, what is wrong with <code>uint32_t mask = 1 &lt;&lt; 20;</code> and how is it fixed? Why does the same line work on a desktop PC?</p></ask>
+<sol><p>The constant 1 is a 16-bit int on AVR, and shifting it by 20 exceeds its width: undefined behavior, typically giving 0. Write <code>1UL &lt;&lt; 20</code> (or <code>(uint32_t)1 &lt;&lt; 20</code>). On a PC, int is 32 bits, so 1 &lt;&lt; 20 fits; the bug only appears when the code is ported.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Put the 4-bit value v (0–15) onto PD7–PD4 without disturbing PD3–PD0, in a single write to PORTD.</p></ask>
+<sol><p><code>PORTD = (PORTD &amp; 0x0F) | ((v &lt;&lt; 4) &amp; 0xF0);</code>. The AND keeps the low nibble and clears the high one; the shifted, masked value supplies the new high nibble.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write an expression that is true when exactly one bit of the unsigned value x is 1, and explain why it works.</p></ask>
+<sol><p><code>x != 0 &amp;&amp; (x &amp; (x - 1)) == 0</code>. Subtracting 1 clears the lowest set bit and sets all bits below it; ANDing with x therefore clears the lowest set bit. If x had only one set bit, the result is 0. (This is the power-of-two test.)</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Count the 1 bits in a byte with a loop that runs once per set bit.</p></ask>
+<sol><pre lang="c">uint8_t popcount8(uint8_t x)
+{
+    uint8_t n = 0;
+    while (x) {
+        x &= x - 1;   // clear the lowest set bit
+        n++;
+    }
+    return n;
+}</pre><p>It iterates once per 1 bit (Kernighan's method), so 0x81 takes two iterations.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using the debouncing program in the text, what happens if the button is held down for 3 seconds? How many times does the LED toggle?</p></ask>
+<sol><p>It toggles <b>once</b>: after confirming the press it waits in the release loop for the whole 3 seconds, then debounces the release. The cost is that nothing else runs during those 3 seconds.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Show that <code>x ^= y; y ^= x; x ^= y;</code> swaps two variables without a temporary. When does it fail?</p></ask>
+<sol><p>Let the originals be a and b. After the first line x = a ⊕ b. Then y = b ⊕ (a ⊕ b) = a. Then x = (a ⊕ b) ⊕ a = b. It fails if x and y are the <b>same object</b> (for example swapping a[i] with a[j] when i = j): the first line sets it to a ⊕ a = 0 and it stays 0. It is also no faster than using a temporary on modern compilers.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Write a macro or inline function that writes a w-bit value into bits s to s + w − 1 of a register, and use it to set bits 5–3 of PORTB to the value 6.</p></ask>
+<sol><pre lang="c">static inline uint8_t set_field(uint8_t reg, uint8_t s, uint8_t w, uint8_t value)
+{
+    uint8_t mask = ((1u << w) - 1u) << s;
+    return (uint8_t)((reg & ~mask) | ((value << s) & mask));
+}
+
+PORTB = set_field(PORTB, 3, 3, 6);   // bits 5..3 become 110</pre>
+<p>The mask for s = 3, w = 3 is 0x38; 6 &lt;&lt; 3 = 0x30, so bits 5 and 4 become 1 and bit 3 becomes 0.</p></sol>
+</prob>
+</practice>
+</module>

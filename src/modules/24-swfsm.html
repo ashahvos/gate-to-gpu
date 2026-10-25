@@ -1,0 +1,175 @@
+<module id="swfsm" num="24" part="6" title="State machines in software" short="Software state machines" pre="mcu,fsm" blurb="Structuring embedded programs as state machines: the read-decide-act loop, enums and switch statements, non-blocking debouncing, time-based transitions, running several tasks at different rates without an operating system, and string-matching automata.">
+
+<p>The button program in <ref to="mcu"/> works, but it cannot do anything else while it waits for the button to be released. Real embedded programs juggle several activities at once: blinking an indicator, scanning a keypad, updating a display, watching a sensor. Without an operating system, the standard way to do that is to write each activity as a <b>state machine</b> that does a small amount of work and returns, and to step all of them from one loop. The state machine model is exactly the one from <ref to="fsm"/>; only the implementation changes from flip-flops to variables.</p>
+
+<h3>State in software</h3>
+<p>The state of a program is whatever it must remember to interpret its next inputs. A play/pause button needs one bit (playing or paused) to know what a press means. In hardware that bit lives in a flip-flop; in software it lives in a variable. A state diagram is drawn the same way in both cases, with Moore outputs inside states and Mealy outputs on transitions, written as condition / action.</p>
+<diagram name="washer_fsm">A washing machine controller. FULL, EMPTY, LID and PAID are sensor inputs, T is a timer, and N counts remaining rinse cycles. The actions after the slashes happen once, on the transition.</diagram>
+<p>Every time step of a state machine, in hardware or software, does the same three things: read the inputs, use the current state and the inputs to determine the outputs and the next state, and move to the next state.</p>
+
+<h3>The structure of the program</h3>
+<diagram name="superloop">One loop iteration is one time step. The single delay at the end sets the time step for everything.</diagram>
+<ul>
+<li>Keep the state in a variable, and name the states with an <code>enum</code>.</li>
+<li>Run a <code>while (1)</code> loop with <b>exactly one delay per iteration</b> (or, better, wait for a timer tick; see <ref to="interrupts"/>). That makes every iteration one time step of known length.</li>
+<li>Read each input <b>once</b> per iteration into a local variable, so that every decision in the iteration sees the same value.</li>
+<li>Use a <code>switch</code> (or if-else chain) on the current state; inside each case, check the inputs, set the next state and perform the transition actions.</li>
+<li>Never wait inside a case. A state that needs to wait simply stays in the same state on the next iteration.</li>
+</ul>
+
+<h3>Example: debouncing without blocking</h3>
+<p>Debouncing is a natural state machine: the program must remember whether the button is up or down and whether it has been stable long enough. Sampling once per millisecond and requiring five consecutive identical samples gives a 5 ms debounce that never blocks.</p>
+<diagram name="debounce_fsm">The debouncer. The action that responds to a press belongs on the transition from MAYBE DOWN to PRESSED, so it runs exactly once per press.</diagram>
+<pre lang="c">enum state { RELEASED, MAYBE_DOWN, PRESSED, MAYBE_UP };
+
+int main(void)
+{
+    enum state s = RELEASED;
+    uint8_t count = 0;
+    DDRB |= (1 << PB5);                            // LED output
+    PORTD |= (1 << PD2);                           // button input with pull-up
+
+    while (1) {
+        uint8_t down = (PIND & (1 << PD2)) == 0;   // read the input once
+
+        switch (s) {
+        case RELEASED:
+            if (down) { s = MAYBE_DOWN; count = 0; }
+            break;
+        case MAYBE_DOWN:
+            if (!down)
+                s = RELEASED;                      // it was a bounce
+            else if (++count == 5) {
+                s = PRESSED;
+                PORTB ^= (1 << PB5);               // Mealy action: once per press
+            }
+            break;
+        case PRESSED:
+            if (!down) { s = MAYBE_UP; count = 0; }
+            break;
+        case MAYBE_UP:
+            if (down)
+                s = PRESSED;
+            else if (++count == 5)
+                s = RELEASED;
+            break;
+        }
+        /* other tasks go here, each taking a short step */
+        _delay_ms(1);                              // one time step
+    }
+}</pre>
+<p>The distinction between Moore and Mealy outputs matters in software too. Code placed in a state's case runs on every iteration spent in that state (a Moore output, like keeping a motor on); code placed on a transition runs once (a Mealy action, like counting a press). Toggling the LED inside <code>case PRESSED</code> would toggle it every millisecond while the button is held.</p>
+
+<h3>Time-based transitions</h3>
+<p>With a fixed time step, time is measured by counting iterations. A traffic light with a 1-second loop that must stay green for 30 s, yellow for 5 s and red for 35 s keeps a counter, resets it on every transition, and leaves each state when the counter reaches that state's duration. Transitions that always happen when time runs out are drawn with the label "1" (unconditional) or with the timer condition.</p>
+<pre lang="c">enum light { GREEN, YELLOW, RED };
+enum light s = GREEN;
+uint8_t t = 0;                       // seconds spent in the current state
+
+while (1) {
+    t++;
+    switch (s) {
+    case GREEN:  if (t == 30) { s = YELLOW; t = 0; } break;
+    case YELLOW: if (t == 5)  { s = RED;    t = 0; } break;
+    case RED:    if (t == 35) { s = GREEN;  t = 0; } break;
+    }
+    set_lamps(s);                    // Moore outputs: a function of the state only
+    _delay_ms(1000);
+}</pre>
+
+<h3>Several tasks at different rates</h3>
+<p>A program that must blink an LED every 250 ms and also scan buttons every 100 ms cannot simply delay 250 ms or 100 ms. Instead, choose a <b>base tick</b> that divides every task's period, the greatest common divisor: GCD(250, 100) = 50 ms. Each task keeps its own counter and runs every k ticks.</p>
+<pre lang="c">uint8_t blink_ticks = 0, scan_ticks = 0;
+while (1) {
+    if (++blink_ticks == 5) { blink_ticks = 0; PORTD ^= (1 << PD7); }   // every 250 ms
+    if (++scan_ticks == 2)  { scan_ticks = 0;  scan_buttons(); }        // every 100 ms
+    _delay_ms(50);                                                      // the base tick
+}</pre>
+<wavegen name="multirate">Two tasks on a 50 ms base tick. A single shared counter would instead wrap at the least common multiple of the periods (500 ms = 10 ticks) and test the counter modulo each task's tick count.</wavegen>
+<key><p>This structure, often called a <b>superloop</b> with cooperative multitasking, is how a great deal of firmware is written. Its rule is that no task may block: each one does a little work and returns, so that every task is serviced every tick. A task that needs to wait for something keeps a state that says so and checks again next tick. Getting stuck in a long loop or a long delay inside one task (tunnel vision) starves all the others.</p></key>
+<p>The delay-based tick has a weakness: each iteration takes the delay <i>plus</i> however long the tasks ran, so the timing drifts as the program grows. Driving the loop from a hardware timer interrupt fixes that (<ref to="interrupts"/>).</p>
+
+<h3>State machines for recognizing strings</h3>
+<p>Searching a stream of characters for a pattern is another state machine problem, the software twin of the hardware sequence detectors in <ref to="fsm"/>. A naive search compares the pattern at every starting position, re-reading characters, which costs O(N·T) for text length N and pattern length T. A finite automaton whose state is "how many characters of the pattern currently match" reads each character exactly once, O(N), using the same longest-suffix-that-is-a-prefix rule to decide where to go on a mismatch (this is the Knuth–Morris–Pratt algorithm). The Aho–Corasick algorithm extends the idea to many patterns at once, as needed for searching text for a set of keywords.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>State is what must be remembered; in software it is a variable, usually an <code>enum</code>.</li>
+<li>Loop structure: read inputs once, switch on the state to choose outputs and the next state, then wait one tick.</li>
+<li>Code in a state runs every tick (Moore); code on a transition runs once (Mealy).</li>
+<li>Count ticks for time-based transitions; reset the count on every transition.</li>
+<li>Multiple rates: base tick = GCD of the periods, one counter per task; never block.</li>
+<li>Pattern matching with an automaton reads each input once: O(N) instead of O(N·T).</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>How many states does the controller of a single play/pause button need, and what is the output in each?</p></ask>
+<sol><p><b>Two</b>: PAUSED (output: stopped) and PLAYING (output: playing). Each debounced press moves to the other state.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Tasks must run every 250 ms and every 100 ms. What base tick should the loop use, and after how many ticks does the combined pattern repeat?</p></ask>
+<sol><p>GCD(250, 100) = <b>50 ms</b>. The pattern repeats after LCM(250, 100) = 500 ms = <b>10 ticks</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why should a software state machine read each input once per iteration into a variable instead of reading the port register in every <code>if</code>?</p></ask>
+<sol><p>The pin can change between two reads, so different tests in the same iteration could see different values: for example, one branch sees "pressed" and moves to a new state while another sees "released" and performs a release action. Reading once makes the iteration a consistent snapshot, exactly as a clocked hardware machine samples its inputs at one edge.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>An LED must blink at 2 Hz (one full on-off cycle every 500 ms). How often must the program toggle it, and what statement does the toggle?</p></ask>
+<sol><p>Toggle every <b>250 ms</b>. For an LED on PD7: <code>PORTD ^= (1 &lt;&lt; PD7);</code>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>The traffic light loop runs once per second. How many iterations long is one complete cycle, and what happens if each iteration's task code takes 20 ms in addition to the 1-second delay?</p></ask>
+<sol><p>30 + 5 + 35 = <b>70 iterations</b>. With 20 ms of work per iteration each cycle takes 70 × 1.02 = <b>71.4 s</b> instead of 70 s: the timing drifts by 2% and keeps drifting. A timer-driven tick removes the error.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write the software state machine for a detector whose output is 1 after two or more consecutive 1s on an input sampled once per tick (states S0, S1, S2 as in <ref to="fsm"/>).</p></ask>
+<sol><pre lang="c">enum st { S0, S1, S2 };
+enum st s = S0;
+while (1) {
+    uint8_t x = read_input();
+    switch (s) {
+    case S0: s = x ? S1 : S0; break;
+    case S1: s = x ? S2 : S0; break;
+    case S2: s = x ? S2 : S0; break;
+    }
+    write_output(s == S2);      // Moore output
+    wait_tick();
+}</pre><p>Equivalently the state can be a saturating count of consecutive 1s: <code>count = x ? min(count + 1, 2) : 0;</code> with output <code>count == 2</code>; the count variable is the state.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Tasks must run every 30 ms and every 45 ms. Give the base tick, the tick counts for each task, and the length of the repeating schedule.</p></ask>
+<sol><p>GCD(30, 45) = <b>15 ms</b>. Task A every <b>2</b> ticks, task B every <b>3</b> ticks. LCM(30, 45) = 90 ms = <b>6 ticks</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The debouncer samples once per millisecond. The input (1 = down) reads 1, 0, 1, 1, 1, 1, 1, 1 after starting in RELEASED. On which sample is the press recognized?</p></ask>
+<sol><p>Sample 1 (down): → MAYBE_DOWN, count 0. Sample 2 (up): → RELEASED (a bounce). Sample 3 (down): → MAYBE_DOWN, count 0. Samples 4–8 (down) increment count to 1, 2, 3, 4, 5; at <b>sample 8</b> count reaches 5 and the machine enters PRESSED, toggling the LED once.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>In the washing machine, the rinse counter N is decremented "on the transition from DRAIN to FILL". What goes wrong if a programmer instead writes <code>N--</code> inside <code>case DRAIN:</code>?</p></ask>
+<sol><p>Code inside a state runs on every iteration spent in that state. Draining takes many ticks, so N would be decremented once per tick rather than once per cycle, running out (or wrapping around, if N is unsigned) almost immediately. Actions that must happen once belong on transitions.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What is wrong with this task in a superloop, and how would you restructure it?</p>
+<pre lang="c">void beep_task(void) {
+    if (alarm) {
+        for (int k = 0; k < 500; k++) { PORTB ^= (1 << PB1); _delay_us(500); }
+    }
+}</pre></ask>
+<sol><p>The loop blocks for 500 × 0.5 ms = 250 ms, during which no other task runs (buttons are missed, displays freeze). Restructure as a state machine: keep a counter of remaining half-periods; on each tick (or in a timer interrupt at 2 kHz) toggle the pin once and decrement, and stop when the count reaches 0. Better still, generate the tone with a hardware timer in PWM or CTC toggle mode (<ref to="interrupts"/>).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a thermostat state machine with states OFF, HEAT and COOL, a temperature input T and a setpoint S. Heating starts below S − 1 and stops at S; cooling starts above S + 1 and stops at S. Give the transitions and explain the role of the 1-degree band.</p></ask>
+<sol><p>OFF → HEAT when T &lt; S − 1; OFF → COOL when T &gt; S + 1; otherwise stay OFF. HEAT → OFF when T ≥ S; else stay. COOL → OFF when T ≤ S; else stay. The gap between the start and stop thresholds is hysteresis: without it, measurement noise around S would switch the heater on and off rapidly, wearing out relays and wasting energy. The state remembers which way the system was heading, which a function of T alone cannot do.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Build the string-matching automaton for the pattern "abab" over the alphabet {a, b}: states 0–4 (characters matched), with state 4 meaning a match. Give the transitions, assuming overlapping matches are reported.</p></ask>
+<sol><p>0: a → 1, b → 0. 1 ("a"): a → 1, b → 2. 2 ("ab"): a → 3, b → 0. 3 ("aba"): a → 1, b → <b>4</b> (match). 4 ("abab"): a → 3 (the text ends in "aba"), b → 0. Each character causes exactly one transition, so a text of N characters is scanned in O(N), whereas checking every starting position separately can take O(N·T).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A program uses the 50 ms superloop. A new display task takes 70 ms to redraw the screen. What happens to the other tasks, and how can the display task be made to fit?</p></ask>
+<sol><p>Every iteration in which the display runs takes over 120 ms instead of 50, so the 250 ms and 100 ms tasks run late and timing becomes irregular. Split the redraw into pieces that each fit comfortably in a tick (for example, one line of the display per tick, keeping the next line number as the task's state), or move it to a lower-priority background slot that runs only with leftover time. Measuring each task's worst-case execution time is part of designing such a system.</p></sol>
+</prob>
+</practice>
+</module>

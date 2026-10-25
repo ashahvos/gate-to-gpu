@@ -1,0 +1,161 @@
+<module id="interfacing" num="13" part="3" title="Interfacing: logic levels, drive and loads" short="Interfacing" pre="circuits,cmos" blurb="What it takes for chips and devices to work together electrically: logic-level compatibility and noise margins, output current and fanout, driving LEDs, reading buttons, open-drain buses, level shifting, switching motors and relays, and the basics of signal integrity.">
+
+<p>Inside one chip, every gate was designed to drive the gates around it. At the boundary, nothing is guaranteed: a microcontroller pin may drive an LED, another chip built in a different process, a long cable, or a motor. Two classic surprises motivate this module. An LED connected straight to an output pin lights, but measuring the pin shows 1.8 V instead of 5 V. And an enable signal passed from one chip to another is never recognized as a 1, even though both "use logic levels". Both failures are electrical, and both follow from the circuit ideas in <ref to="circuits"/> and <ref to="cmos"/>.</p>
+
+<h3>Logic levels and noise margins</h3>
+<p>A datasheet specifies four voltages that define a logic family's interface. Two are promises made by outputs and two are requirements of inputs:</p>
+<grid>Parameter | Meaning
+V<sub>OH</sub> (min) | An output driving 1 is guaranteed to be at least this high (at its rated current)
+V<sub>OL</sub> (max) | An output driving 0 is guaranteed to be at most this low
+V<sub>IH</sub> (min) | An input is guaranteed to read 1 for any voltage at or above this
+V<sub>IL</sub> (max) | An input is guaranteed to read 0 for any voltage at or below this</grid>
+<p>Between V<sub>IL</sub> and V<sub>IH</sub> an input's interpretation is undefined; it may read either value, oscillate, or draw extra current. A driver and receiver are compatible when V<sub>OH</sub> &gt; V<sub>IH</sub> and V<sub>OL</sub> &lt; V<sub>IL</sub>, and the differences are the <b>noise margins</b>: NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub> and NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub>. Noise margins are the amount of interference (coupled noise, ground bounce, supply variation) the link can absorb without error.</p>
+<ex title="Checking compatibility in both directions">
+<p>Two devices have these specifications (output currents are negative when flowing out of a pin, the usual datasheet convention):</p>
+<grid cls="mono">Device | V_OH | V_IH | V_IL | V_OL | I_OH | I_IH | I_OL | I_IL
+A | 3.4 V | 3.3 V | 1.0 V | 0.5 V | −4 mA | −1 mA | 10 mA | 2 mA
+B | 3.2 V | 3.0 V | 0.7 V | 0.6 V | −2 mA | −1 mA | 6 mA | 2 mA</grid>
+<p><b>A driving B:</b> NM<sub>H</sub> = 3.4 − 3.0 = 0.4 V and NM<sub>L</sub> = 0.7 − 0.5 = 0.2 V, both positive: compatible.</p>
+<diagram name="logic_levels" args='{"vdd": 5.0, "voh": 3.4, "vih": 3.0, "vil": 0.7, "vol": 0.5, "left": "Device A output", "right": "Device B input"}'>A driving B: the output's guaranteed bands fall inside the input's valid bands, with margin.</diagram>
+<p><b>B driving A:</b> NM<sub>H</sub> = 3.2 − 3.3 = −0.1 V. B's weakest 1 can fall in A's undefined region, so the link fails, even though NM<sub>L</sub> = 1.0 − 0.6 = 0.4 V is fine. Compatibility must be checked in each direction separately.</p>
+<diagram name="logic_levels" args='{"vdd": 5.0, "voh": 3.2, "vih": 3.3, "vil": 1.0, "vol": 0.6, "left": "Device B output", "right": "Device A input"}'>B driving A: a negative high-level margin, drawn in orange. Some B outputs will work on the bench and fail in the field.</diagram>
+</ex>
+<p>Common families make the problem concrete. Classic 5 V TTL uses V<sub>IH</sub> = 2.0 V and V<sub>IL</sub> = 0.8 V, with outputs guaranteeing only 2.4 V and 0.4 V. 5 V CMOS inputs typically need 70% of V<sub>DD</sub> (3.5 V) for a 1 and accept 30% (1.5 V) as a 0; the ATmega328P at 5 V needs 0.6·V<sub>CC</sub> = 3.0 V and accepts 0.3·V<sub>CC</sub> = 1.5 V. 3.3 V parts (LVCMOS/LVTTL) output close to 3.3 V and accept TTL-like thresholds, and 1.8 V and lower families scale thresholds with their supply. A 3.3 V output driving a 5 V CMOS input therefore fails (3.3 &lt; 3.5), works only marginally into the ATmega at 5 V, and works comfortably into a TTL-threshold input such as the 74HCT family. Mismatched families need a <b>level shifter</b>, covered below.</p>
+
+<h3>Output current, input current and fanout</h3>
+<p>Voltages are only half of the interface. Each input draws some current, I<sub>IH</sub> when high and I<sub>IL</sub> when low, and each output can supply at most I<sub>OH</sub> while holding V<sub>OH</sub> and sink at most I<sub>OL</sub> while holding V<sub>OL</sub>. The number of inputs one output can drive, its <b>fanout</b>, is limited in each state by the ratio of the output's capability to each input's demand:</p>
+<eq c>fanout = min( |I<sub>OH</sub>| / |I<sub>IH</sub>| ,  I<sub>OL</sub> / I<sub>IL</sub> )</eq>
+<p>For A driving copies of B in the example above: high, 4 mA/1 mA = 4; low, 10 mA/2 mA = 5; so A can drive <b>4</b> B inputs. Exceed that and the output voltage moves out of its guaranteed band, eroding the noise margin. If one signal must reach more inputs, split the load among buffers.</p>
+<p>CMOS inputs draw almost no static current (microamps of leakage), so their DC fanout is in the thousands. What limits CMOS fanout is capacitance: every input adds a few picofarads on a board (femtofarads on chip), and the output must charge all of it through its resistance, so <b>delay grows linearly with fanout</b>. A design that "works" with a large fanout may simply be slow.</p>
+
+<h3>The output pin as a source with resistance</h3>
+<p>A CMOS output is a PMOS to V<sub>DD</sub> and an NMOS to ground. When it drives 1, the PMOS on-resistance, typically tens of ohms for a microcontroller pin, sits between the supply and the pin: a Thevenin source with R<sub>TH</sub> = R<sub>P</sub>. The pin voltage is whatever the divider formed by R<sub>P</sub> and the load produces.</p>
+<diagram name="pin_model">The load determines the pin voltage. A datasheet expresses this as a curve or table of V<sub>OH</sub> against I<sub>OH</sub>; the guaranteed V<sub>OH</sub> holds only up to the rated current.</diagram>
+<p>This explains the 1.8 V LED. An LED connected directly to the pin with no resistor draws as much current as the PMOS can supply, and its own forward voltage, about 1.8 to 2 V for red, pins the voltage there; the PMOS drops the remaining 3 V while carrying a current far beyond its rating. The pin reads 1.8 V because that is the only voltage consistent with both devices, and the chip is being damaged in the process. For the ATmega328P the recommended maximum is 20 mA per pin, with an absolute maximum of 40 mA and additional limits on the total current through each port and the package.</p>
+
+<h3>Driving LEDs</h3>
+<p>An LED needs its current set by a series resistor. It can be wired so that the pin sources current (active-high) or sinks it (active-low):</p>
+<diagram name="led_drive">Both wirings work. Active-low wiring was traditional for TTL, whose outputs sank current much better than they sourced it; CMOS outputs are roughly symmetric.</diagram>
+<p>The resistor value follows from KVL around the loop: R = (V<sub>DD</sub> − V<sub>F</sub> − V<sub>drop</sub>)/I, where V<sub>drop</sub> is the pin's own voltage loss at that current (often neglected; a few tenths of a volt at 10 to 20 mA). For a red LED (V<sub>F</sub> ≈ 2 V) at 10 mA from 5 V, R ≈ 300 Ω; 330 Ω is the nearest standard value. Software must match the wiring: with an active-low LED, writing 0 turns it on.</p>
+
+<h3>Reading buttons and switches</h3>
+<p>A CMOS input has extremely high impedance: it neither defines its own voltage nor draws current. An unconnected (<b>floating</b>) input therefore drifts with leakage and picks up noise, reading random values and possibly sitting mid-supply, where both input transistors conduct and waste current. Every input must be driven by something, including inputs connected to switches when the switch is open.</p>
+<diagram name="button_pullup">The standard button circuit. The resistor holds the input at 1 until the button overrides it with a direct connection to ground.</diagram>
+<p>A <b>pull-up</b> resistor ties the input to V<sub>DD</sub>; the button connects it to ground when pressed. The button wins because it is a near-zero resistance compared with the pull-up, and only V<sub>DD</sub>/R flows while it is held (0.5 mA for 10 kΩ at 5 V). A pull-down with the button to V<sub>DD</sub> works too, giving an active-high button. Most microcontrollers include optional internal pull-ups (20 to 50 kΩ on the ATmega328P), enabled on the AVR by making the pin an input (DDR bit 0) and writing 1 to its PORT bit:</p>
+<pre lang="c">DDRD  &= ~(1 << PD2);           // PD2 is an input
+PORTD |=  (1 << PD2);           // enable its internal pull-up
+if ((PIND & (1 << PD2)) == 0) { // button pressed (active-low)
+    /* ... */
+}</pre>
+<p>The pull-up value is a compromise: lower values resist noise better and charge the line's capacitance faster, while higher values waste less current when the button is pressed. Mechanical contacts also <b>bounce</b>, making and breaking contact for several milliseconds; software debouncing is in <ref to="mcu"/>, and the hardware alternative (RC filter plus Schmitt trigger) in <ref to="analog"/>.</p>
+
+<h3>Open-drain outputs and shared lines</h3>
+<p>An ordinary (push-pull) output actively drives both levels. If two push-pull outputs share a wire and disagree, one PMOS and one NMOS form a low-resistance path from V<sub>DD</sub> to ground: <b>bus contention</b>, which wastes tens of milliamps, produces an undefined voltage, and can damage the drivers. An <b>open-drain</b> (open-collector in bipolar logic) output has only the pull-down transistor: it can drive 0 or let go, and a single external pull-up resistor provides the 1.</p>
+<diagram name="open_drain">Any number of open-drain outputs can share a line. The line is high only if every device releases it.</diagram>
+<p>The line computes the AND of all devices' "release" signals, a <b>wired-AND</b>, with no possibility of contention. This is how I²C shares its SDA and SCL lines, how several chips share one interrupt request line, and how devices running at different supply voltages can share a signal (each sees the pull-up voltage). The cost is the rising edge: it is driven only by the pull-up resistor charging the line capacitance, with time constant R<sub>pull-up</sub>·C<sub>line</sub>. The resistor must be small enough for the required rise time and large enough that a driver can pull the line below V<sub>OL</sub>: R ≥ (V<sub>DD</sub> − V<sub>OL</sub>)/I<sub>OL</sub>.</p>
+<p>Tristate outputs are the other way to share a wire (<ref to="blocks"/>): every device has a full push-pull driver with an enable, and the protocol guarantees that exactly one is enabled at a time.</p>
+
+<h3>Level shifting</h3>
+<p>When two families' levels are incompatible, or when a higher voltage would exceed an input's absolute maximum rating, a level shifter sits between them.</p>
+<diagram name="level_shift">Two inexpensive level shifters. Dedicated translator ICs do the same job with better speed and are the usual choice for fast or many signals.</diagram>
+<ul>
+<li>A <b>resistor divider</b> safely drops a 5 V output to a 3.3 V input, one direction only, and adds an RC delay with the input's capacitance.</li>
+<li>A single <b>MOSFET</b> with its gate at the low supply translates a bidirectional open-drain line such as I²C: when the low side pulls down, the transistor turns on and pulls the high side down too; when the high side pulls down, the transistor's body diode and then the channel pull the low side down; when both release, each side's pull-up raises it to its own supply.</li>
+<li><b>Translator ICs</b> (and logic families with TTL-compatible inputs, such as 74HCT, or 5 V-tolerant inputs) handle push-pull signals and high speeds.</li>
+</ul>
+<warn><p>Driving a 5 V signal into a 3.3 V input that is not 5 V-tolerant forward-biases the input's clamp diode into the 3.3 V supply. With no series resistance, the current can damage the pin or even raise the 3.3 V rail. Check the input's absolute maximum rating, usually V<sub>DD</sub> + 0.3 V or 0.5 V.</p></warn>
+
+<h3>Driving loads larger than a pin</h3>
+<p>Motors, relays, solenoids, high-power LEDs and speakers need more current, and often more voltage, than a logic pin can provide. A speaker is a good illustration: a pin delivering 5 V at 20 mA supplies 0.1 W, and connecting an 8 Ω speaker directly would ask for over 600 mA. The pin should provide only the control signal; a transistor switch or amplifier, powered from a suitable supply, provides the power.</p>
+<diagram name="lowside_switch">A low-side switch. The MOSFET connects the load's lower terminal to ground, so the pin only needs to drive the gate, which draws current only while switching.</diagram>
+<ul>
+<li>Choose a <b>logic-level</b> MOSFET, whose on-resistance R<sub>DS(on)</sub> is specified at a gate voltage the pin can supply (4.5 V or 2.5 V). Its conduction loss is I²R<sub>DS(on)</sub>: 2 A through 20 mΩ dissipates 80 mW.</li>
+<li>The <b>gate resistor</b> (tens to hundreds of ohms) limits the current spike into the gate capacitance and damps ringing; the <b>pull-down</b> keeps the MOSFET off while the microcontroller is in reset and its pins are floating inputs.</li>
+<li>An inductive load needs a <b>flyback diode</b> across it. Without one, interrupting the coil current produces a voltage spike (v = L di/dt) that can destroy the transistor (<ref to="circuits"/>).</li>
+<li>Bidirectional motor control uses an <b>H-bridge</b> of four switches; speed is controlled with PWM.</li>
+<li>A hobby <b>servo</b> separates the two roles in its three wires: power and ground from a supply that can deliver the motor current, and a signal wire that carries only a logic-level PWM pulse whose width sets the angle.</li>
+</ul>
+
+<h3>Signal integrity in brief</h3>
+<p>At high edge rates, wires stop behaving like ideal connections:</p>
+<ul>
+<li><b>Ground bounce and supply droop.</b> When many outputs switch together, the surge of current through the package's supply and ground inductance (L·di/dt) shifts the chip's internal ground, eroding noise margins. Decoupling capacitors placed close to every supply pin (100 nF ceramic is typical, plus larger bulk capacitors per board) supply the transient current locally.</li>
+<li><b>Transmission lines.</b> A signal travels along a circuit-board trace at about half the speed of light, roughly 15 cm/ns. When a trace is longer than about one-sixth of the distance an edge travels during its rise time, the trace must be treated as a transmission line with characteristic impedance Z<sub>0</sub> (often 50 Ω). A mismatch between Z<sub>0</sub> and the driver or receiver impedance reflects part of the edge, causing overshoot and ringing. A <b>series termination</b> resistor at the driver, chosen so that driver impedance plus resistor equals Z<sub>0</sub>, absorbs the reflection.</li>
+<li><b>Crosstalk.</b> Capacitive and inductive coupling between neighboring traces injects noise. Spacing, ground planes and slower edges reduce it.</li>
+<li><b>Differential signaling.</b> High-speed links (LVDS, USB, PCIe, HDMI, Ethernet) send each bit on a pair of wires driven in opposite directions and read the difference, which rejects noise common to both wires and allows small swings and very high data rates.</li>
+</ul>
+
+<h3>Summary</h3>
+<ul>
+<li>Compatibility: V<sub>OH</sub> &gt; V<sub>IH</sub> and V<sub>OL</sub> &lt; V<sub>IL</sub>, checked in each direction. NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub>; NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub>.</li>
+<li>Fanout = min(|I<sub>OH</sub>/I<sub>IH</sub>|, I<sub>OL</sub>/I<sub>IL</sub>); for CMOS, capacitance limits fanout through delay.</li>
+<li>An output is a Thevenin source: the load sets the pin voltage. Respect per-pin and per-package current limits (20 mA recommended, 40 mA absolute maximum per ATmega328P pin).</li>
+<li>LEDs need series resistors; inputs must never float; buttons use pull-ups (internal or external) and read active-low.</li>
+<li>Open-drain outputs with a pull-up share lines safely (wired-AND, I²C); push-pull outputs on one wire cause contention.</li>
+<li>Level-shift between families; switch large loads with logic-level MOSFETs, gate pull-downs and flyback diodes.</li>
+<li>Fast edges bring ground bounce, reflections and crosstalk; decouple supplies, terminate long lines, and use differential pairs for the fastest links.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>A 5 V TTL family has V<sub>OH</sub> = 2.4 V, V<sub>IH</sub> = 2.0 V, V<sub>IL</sub> = 0.8 V and V<sub>OL</sub> = 0.4 V. What are its noise margins?</p></ask>
+<sol><p>NM<sub>H</sub> = 2.4 − 2.0 = <b>0.4 V</b>; NM<sub>L</sub> = 0.8 − 0.4 = <b>0.4 V</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Write the two AVR statements that make PB3 an input with its internal pull-up enabled, and an expression that is true when a button from PB3 to ground is pressed.</p></ask>
+<sol><p><code>DDRB &amp;= ~(1 &lt;&lt; PB3);</code> and <code>PORTB |= (1 &lt;&lt; PB3);</code>. Pressed: <code>(PINB &amp; (1 &lt;&lt; PB3)) == 0</code>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Using devices A and B from the worked example, how many B inputs can one A output drive? How many A inputs can one B output drive (ignoring the voltage problem)?</p></ask>
+<sol><p>A → B: high 4/1 = 4, low 10/2 = 5, fanout <b>4</b>. B → A: high |−2|/|−1| = 2, low 6/2 = 3, fanout <b>2</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A red LED (V<sub>F</sub> = 2.1 V) is wired active-low to a 5 V pin and should carry 15 mA. At 15 mA the pin's V<sub>OL</sub> is 0.5 V. What resistor is needed, and what does the code write to turn the LED on?</p></ask>
+<sol><p>R = (5 − 2.1 − 0.5)/0.015 = <b>160 Ω</b> (use 160 or 180 Ω). Active-low: write <b>0</b> to the pin to turn it on.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why should an unused CMOS input never be left unconnected? Name two acceptable ways to terminate it.</p></ask>
+<sol><p>A floating input picks up noise and leakage, may read random values, and may sit mid-supply where both input transistors conduct, wasting current and possibly oscillating. Tie it to V<sub>DD</sub> or ground (directly or through a resistor), or on a microcontroller enable the internal pull-up or configure the pin as an output.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 3.3 V device's output (V<sub>OH</sub> = 3.1 V at its load) drives three possible 5 V receivers: a 5 V CMOS gate with V<sub>IH</sub> = 3.5 V, an ATmega328P at 5 V (V<sub>IH</sub> = 3.0 V), and a 74HCT gate (V<sub>IH</sub> = 2.0 V). Which links work, and with what high-level margin?</p></ask>
+<sol><p>5 V CMOS: 3.1 − 3.5 = <b>−0.4 V, fails</b>. ATmega: 3.1 − 3.0 = <b>+0.1 V, marginal</b>: it may work on the bench but has almost no noise immunity. 74HCT: 3.1 − 2.0 = <b>+1.1 V, robust</b>. The low levels are fine in all three cases.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Size the pull-up resistors for an I²C bus at 3.3 V with 200 pF of bus capacitance. Drivers must hold V<sub>OL</sub> ≤ 0.4 V while sinking at most 3 mA, and the 30%–70% rise time must not exceed 1 μs (t<sub>r</sub> ≈ 0.85RC).</p></ask>
+<sol><p>Minimum: R ≥ (3.3 − 0.4)/0.003 = <b>967 Ω</b>. Maximum: 0.85 × R × 200 pF ≤ 1 μs → R ≤ <b>5.9 kΩ</b>. Any standard value between, typically 2.2 kΩ to 4.7 kΩ, works; lower values give faster edges and more power while the line is held low.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Two push-pull outputs, each with 25 Ω pull-up and pull-down resistance, are accidentally connected and drive opposite values at 3.3 V. What current flows and what is the wire's voltage? Why is the same mistake harmless with open-drain outputs?</p></ask>
+<sol><p>The path V<sub>DD</sub> → 25 Ω → wire → 25 Ω → ground carries 3.3/50 = <b>66 mA</b>, above typical pin ratings, and the wire sits near <b>1.65 V</b>, in the undefined region. Open-drain outputs can only pull low; there is no pull-up transistor to fight, so the line is simply low.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 12 V, 2 A motor is switched by a MOSFET with R<sub>DS(on)</sub> = 20 mΩ at V<sub>GS</sub> = 4.5 V. How much power does the MOSFET dissipate when on? What changes if the gate is driven from a 3.3 V pin and the datasheet gives R<sub>DS(on)</sub> only at 4.5 V and 10 V?</p></ask>
+<sol><p>P = I²R = 4 × 0.02 = <b>80 mW</b>. At V<sub>GS</sub> = 3.3 V the transistor may be only partly on, with much higher and unspecified resistance: it could dissipate watts and overheat. Choose a MOSFET specified at 2.5 V or lower, or add a gate driver.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Four outputs of a chip switch at the same time, each driving 15 pF through a 3.3 V swing with the current flowing for about 1 ns. The ground pin and bond wire have 5 nH of inductance. Estimate the ground bounce.</p></ask>
+<sol><p>Charge per output = 15 pF × 3.3 V ≈ 50 pC; over 1 ns that is about 50 mA each, 200 mA total. If that current ramps up in roughly 1 ns, di/dt ≈ 0.2 A/ns and V = L·di/dt ≈ 5 nH × 0.2 A/ns = <b>about 1 V</b>, a large fraction of the noise margin. Remedies: more ground pins, slower edges where speed is not needed, and decoupling capacitors close to the pins.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A signal with a 1 ns rise time travels on a board trace at 15 cm/ns. Beyond roughly what trace length should it be treated as a transmission line? A driver has 15 Ω output impedance and the trace has Z<sub>0</sub> = 50 Ω. What series termination resistor is appropriate?</p></ask>
+<sol><p>The edge spans 15 cm; one-sixth of that is about <b>2.5 cm</b>. Series termination makes the source impedance match the line: R = 50 − 15 = <b>35 Ω</b> (33 Ω is the nearest standard value).</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A CMOS output has 50 Ω output resistance and its inputs draw 1 μA leakage, while the output can supply 4 mA. Each driven input adds 5 pF (including wiring). If the 10%–90% rise time must stay under 10 ns, what fanout is allowed? Compare with the DC fanout.</p></ask>
+<sol><p>DC fanout: 4 mA/1 μA = <b>4000</b>. Rise time 2.2RC ≤ 10 ns → C ≤ 10/(2.2 × 50) ns/Ω ≈ 91 pF → at most <b>18 inputs</b>. Capacitance, not DC current, limits CMOS fanout.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A 5 V output must drive a 3.3 V input that is not 5 V-tolerant. Its clamp diode to the 3.3 V supply drops 0.6 V. Estimate the clamp current through a 1 kΩ series resistor, then design a resistor divider instead and give its output voltage.</p></ask>
+<sol><p>The input is clamped at about 3.3 + 0.6 = 3.9 V, so the resistor carries (5 − 3.9)/1000 ≈ <b>1.1 mA</b> into the 3.3 V supply through the diode: survivable but poor practice, and it can lift a lightly loaded supply. A divider of 1.8 kΩ over 3.3 kΩ gives 5 × 3.3/5.1 ≈ <b>3.24 V</b>, within range and drawing 1 mA from the 5 V output.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Explain how the single-MOSFET bidirectional level shifter works in each of three cases: the 3.3 V side pulls low; the 5 V side pulls low; neither side pulls low. Why does it only work with open-drain signals?</p></ask>
+<sol><p>The gate is tied to 3.3 V and the source to the 3.3 V side. (1) <b>Low side pulls low:</b> V<sub>GS</sub> = 3.3 V, the MOSFET turns on and pulls the 5 V side low too. (2) <b>High side pulls low:</b> the MOSFET's body diode (anode on the 3.3 V side, cathode on the 5 V side) conducts and drags the low side down to about 0.6 V; then V<sub>GS</sub> exceeds threshold and the channel pulls it fully low. (3) <b>Neither:</b> both sides float up through their pull-ups; with the source at 3.3 V, V<sub>GS</sub> = 0 and the MOSFET is off, so each side sits at its own supply. It needs open-drain drivers because the 1 is always provided by a pull-up resistor; a push-pull driver on one side would fight the shifter.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Why can a microcontroller pin drive a hobby servo's control input directly but not a small 8 Ω speaker? Quantify the speaker case at 5 V.</p></ask>
+<sol><p>The servo's signal wire only carries a logic-level PWM pulse into a high-impedance input; the motor current comes from the servo's separate power wire. The speaker is the load itself: 5 V across 8 Ω would demand <b>625 mA</b>, more than 15 times the pin's 40 mA absolute maximum. Even at the 20 mA limit the pin delivers only 0.1 W. Use an audio amplifier (or at least a transistor) powered from the supply, with the pin providing only the signal.</p></sol>
+</prob>
+</practice>
+</module>

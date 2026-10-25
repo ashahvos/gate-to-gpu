@@ -1,0 +1,159 @@
+<module id="fsm" num="16" part="4" title="State machines in hardware" short="State machines" pre="registers,kmaps" blurb="Datapath and control, the formal model of a finite state machine, Moore and Mealy outputs, a complete design by K-map and by one-hot inspection, sequence detectors, correct specifications, and state minimization.">
+
+<p>Registers and counters follow fixed patterns. Most digital systems need control that depends on what has happened so far: a protocol handler waits for a start bit, a cache controller walks through a miss, a divider repeats until done. That control is a <b>finite state machine</b> (FSM), and implementing one in hardware is a direct application of everything in the last two modules.</p>
+
+<h3>Datapath and control</h3>
+<p>Larger designs separate into two parts. The <b>datapath</b> holds and transforms data: registers, adders, comparators, multiplexers, counters and memories. The <b>control unit</b> is an FSM that decides, cycle by cycle, what the datapath does: which register loads, which mux input is selected, whether a counter counts. It issues <b>control signals</b> to the datapath and reads back <b>status signals</b> from it, such as "result is zero" or "A &lt; B".</p>
+<diagram name="divider_dp">Division by repeated subtraction. The datapath can subtract, load and count; the controller sequences those operations and stops when the subtraction would borrow.</diagram>
+<ex title="Dividing 13 by 4">
+<p>INIT loads REM = 13, DIVISOR = 4 and clears QUO. Then the controller alternates between TEST, which examines the subtractor's borrow output, and SUB, which writes the difference back into REM and increments QUO:</p>
+<grid cls="mono">State | REM | QUO | REM − DIVISOR | borrow | action
+TEST | 13 | 0 | 9 | 0 | go to SUB
+SUB | 13 | 0 | 9 | 0 | REM ← 9, QUO ← 1; go to TEST
+TEST | 9 | 1 | 5 | 0 | go to SUB
+SUB | 9 | 1 | 5 | 0 | REM ← 5, QUO ← 2; go to TEST
+TEST | 5 | 2 | 1 | 0 | go to SUB
+SUB | 5 | 2 | 1 | 0 | REM ← 1, QUO ← 3; go to TEST
+TEST | 1 | 3 | −3 | 1 | go to DONE</grid>
+<p>Each row shows the register values during that cycle; the loads requested in a SUB cycle take effect at the clock edge that ends it. The result is quotient 3, remainder 1. The number of cycles grows with the quotient, which is why real dividers use shift-and-subtract (one quotient bit per cycle) instead, but the structure, a datapath steered by a state machine, is the same.</p>
+</ex>
+
+<h3>What a state machine is</h3>
+<p>The state of a system is exactly what it must remember about the past in order to respond correctly to future inputs. A play/pause button needs one bit of state (playing or paused); a detector looking for the pattern 101 must remember how much of the pattern it has seen so far.</p>
+<def term="Finite state machine">A model of sequential behavior consisting of a finite set of states, an initial state, a set of inputs and outputs, a next-state function that maps (current state, input) to the next state, and an output function. In a Moore machine the outputs depend only on the current state; in a Mealy machine they depend on the current state and the current inputs.</def>
+<p>State diagrams draw states as circles and transitions as arrows labeled with the input condition that causes them. Moore outputs are written inside the states; Mealy outputs are written on the arrows after a slash (input/output).</p>
+
+<h3>The hardware structure</h3>
+<p>Every synchronous FSM has the same three parts: a <b>state register</b> of flip-flops holding the current state's code, <b>next-state logic</b> that computes the next code from the current state and inputs, and <b>output logic</b>.</p>
+<diagram name="fsm_block">The FSM template. A software implementation has the same parts: a state variable, a switch statement that computes the next state, and code that sets outputs (<ref to="swfsm"/>).</diagram>
+<key><p>Because a D flip-flop simply loads D at the edge (Q* = D), designing the next-state logic means one thing: for each state S and input combination, make the D inputs equal to the code of the state the machine should be in next cycle.</p></key>
+
+<h3>Moore and Mealy outputs</h3>
+<p>The same behavior can usually be described either way. A detector for the pattern 101 (allowing overlaps, so that 10101 contains two matches) needs four Moore states but only three Mealy states, because the Mealy machine can announce the match on the transition instead of entering a dedicated "found" state.</p>
+<diagram name="seq101" args='{"kind": "moore"}'>Moore version. The output is a function of the state alone, so it is 1 for the whole cycle after the final 1 has been clocked in.</diagram>
+<diagram name="seq101" args='{"kind": "mealy"}'>Mealy version. The output is 1 during the cycle in which the machine is in S2 and the input is 1, before the clock edge that consumes that input.</diagram>
+<wavegen name="moore_mealy">Both detectors on the same input. The Mealy output responds within the same cycle as the input (and follows any change in the input combinationally); the Moore output appears one cycle later and lasts exactly one full cycle.</wavegen>
+<p>The trade-offs:</p>
+<ul>
+<li>Mealy machines often need fewer states and respond a cycle earlier.</li>
+<li>A Mealy output has a combinational path from input to output, so it can glitch when inputs glitch, and connecting Mealy machines in a loop can create combinational cycles.</li>
+<li>Moore outputs change only after clock edges, which makes timing easier to reason about. Many designs go further and <b>register</b> their outputs (compute the output for the next state and store it in a flip-flop), making outputs glitch-free at the cost of one cycle of latency.</li>
+</ul>
+<tool name="fsmgen"/>
+
+<h3>Specifying transitions correctly</h3>
+<p>A hardware FSM must be told what to do in every state for every input combination. Two rules make a specification complete and consistent:</p>
+<ol>
+<li>The conditions on the arrows leaving a state must be <b>mutually exclusive</b>: no input combination may satisfy two of them.</li>
+<li>They must be <b>all-inclusive</b>: every input combination must satisfy one of them. In particular, "stay in this state" must be drawn as an explicit self-loop with its condition.</li>
+</ol>
+<p>For example, if a state has arrows labeled A and B to two different states, the combination A = B = 1 is ambiguous and A = B = 0 is missing. Fix it by assigning priority (A; A′·B; A′·B′ for the self-loop). An arrow with no label means "always" (condition 1). With k inputs a state has up to 2ᵏ input combinations, but conditions are usually written as simplified expressions.</p>
+
+<h3>Design by state encoding and K-maps</h3>
+<p>Consider a Moore machine with input X and output F that is 1 when the last two or more inputs were 1. It needs three states: S0 (last input 0, or start), S1 (one 1), S2 (two or more consecutive 1s, F = 1).</p>
+<diagram name="consec1s">The consecutive-1s detector.</diagram>
+<p>The design procedure:</p>
+<ol>
+<li><b>State table</b>: for each state and input, the next state and the output.</li>
+<li><b>Encoding</b>: assign each state a binary code. Three states need ⌈log₂ 3⌉ = 2 flip-flops: S0 = 00, S1 = 01, S2 = 10, with 11 unused.</li>
+<li><b>Transition table</b>: substitute the codes.</li>
+<li><b>K-maps</b>: one per flip-flop D input and per output, treating unused codes as don't cares.</li>
+</ol>
+<grid cls="mono">Q1 Q0 (state) | X | D1 D0 (next) | F
+00 (S0) | 0 | 00 (S0) | 0
+00 (S0) | 1 | 01 (S1) | 0
+01 (S1) | 0 | 00 (S0) | 0
+01 (S1) | 1 | 10 (S2) | 0
+10 (S2) | 0 | 00 (S0) | 1
+10 (S2) | 1 | 10 (S2) | 1
+11 (unused) | x | xx | x</grid>
+<p>From the maps: <b>D1 = X·Q1 + X·Q0</b> (the next state is S2 when X = 1 in S1 or S2), <b>D0 = X·Q1′·Q0′</b> (next state S1 only from S0 with X = 1), and <b>F = Q1</b>. Two flip-flops, a handful of gates. The reset input must force the flip-flops to 00.</p>
+<warn><p>Treating unused codes as don't cares minimizes logic, but the machine's behavior in those states is then whatever the logic happens to produce. If a glitch or radiation upset ever lands the machine in 11, it might stay there. Safety-critical designs instead specify a recovery transition from every unused code back to a known state.</p></warn>
+
+<h3>One-hot encoding: design by inspection</h3>
+<p>Instead of packing states into the minimum number of bits, a <b>one-hot</b> encoding uses one flip-flop per state, exactly one of which is 1. Next-state logic can then be read directly off the diagram: the flip-flop for state S must be 1 next cycle if the machine is in some state with an arrow into S and that arrow's condition is true.</p>
+<eq c>D<sub>S</sub> = Σ over arrows into S of (Q<sub>source</sub> · condition)</eq>
+<p>For the consecutive-1s detector: D<sub>S1</sub> = Q<sub>S0</sub>·X; D<sub>S2</sub> = Q<sub>S1</sub>·X + Q<sub>S2</sub>·X; D<sub>S0</sub> = X′·(Q<sub>S0</sub> + Q<sub>S1</sub> + Q<sub>S2</sub>) = X′, since exactly one of the three is always 1. Each output is the OR of the state bits in which it is 1: F = Q<sub>S2</sub>. Reset presets the initial state's flip-flop and clears the rest.</p>
+<grid>Encoding | Flip-flops for n states | Next-state logic | Typical use
+Binary | ⌈log₂ n⌉ | larger, derived with K-maps or tools | ASICs with many states, where flip-flops are costly
+One-hot | n | simple: one term per incoming arrow | FPGAs (plentiful flip-flops), fast control logic
+Gray | ⌈log₂ n⌉ | moderate | sequential state sequences with minimal toggling (power)</grid>
+<p>Because the encoding is invisible from outside the machine, it is a free design choice, and synthesis tools pick one automatically unless told otherwise.</p>
+
+<h3>A machine with hysteresis</h3>
+<p>A water tank has two level sensors: L = 1 when the water is above the low mark, H = 1 when it is above the high mark. The pump should start when the water drops below the low mark and keep running until it reaches the high mark. Between the marks the correct action depends on history (filling or draining), so a combinational function of L and H cannot do it: the controller needs one bit of state.</p>
+<diagram name="pump_fsm">Two states, encoded in one flip-flop Q (1 = pump on). The gap between the two thresholds prevents the pump from switching rapidly on and off.</diagram>
+<p>Reading the arrows into ON: <b>D = Q′·L′ + Q·H′</b> (turn on from OFF when the water is below the low mark; stay on until it reaches the high mark), and the output is simply Q. This is the same idea as the Schmitt trigger's hysteresis (<ref to="analog"/>), implemented with a flip-flop.</p>
+
+<h3>Sequence detectors</h3>
+<p>Detecting a fixed bit pattern is the classic FSM exercise and a common interview question. A Moore detector for an n-bit pattern has n + 1 states (S<sub>k</sub> = "the last k inputs match the first k pattern bits"), and a Mealy detector has n. The only subtle part is where to go on a mismatch: to the state for the longest suffix of what has been seen that is also a prefix of the pattern. For 1011 with overlapping matches, after seeing 101 and then 0, the input ends in 10, which is a prefix of 1011, so the machine goes to the "seen 10" state rather than back to the start. The sequence-detector tool above computes these transitions for any pattern.</p>
+
+<h3>State minimization</h3>
+<p>Two states are <b>equivalent</b> if, for every possible future input sequence, the machine produces the same outputs starting from either. Equivalent states can be merged. The standard algorithm refines a partition: start by grouping states with identical outputs; then repeatedly split any group whose members, for some input, go to states in different groups; stop when no group splits. The remaining groups are the states of the minimal machine. Designs written by hand often contain redundant states; synthesis tools merge them.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Datapath + controller: the FSM issues control signals and reads status signals.</li>
+<li>An FSM is a state register, next-state logic and output logic; to reach state S next cycle, set D to S's code now.</li>
+<li>Moore outputs depend on state only (one cycle later, glitch-free); Mealy outputs also depend on inputs (earlier, fewer states, combinational paths).</li>
+<li>Transitions out of every state must be mutually exclusive and all-inclusive.</li>
+<li>Binary encoding: fewest flip-flops, K-maps with unused codes as don't cares. One-hot: one flip-flop per state, D<sub>S</sub> = OR of (source · condition).</li>
+<li>Sequence detectors: n + 1 Moore states for an n-bit pattern; on mismatch go to the longest suffix that is a prefix.</li>
+<li>Minimize by partition refinement: split groups until members agree on outputs and next-state groups.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>What is the minimum number of flip-flops for a machine with 5 states using binary encoding? Using one-hot encoding?</p></ask>
+<sol><p>Binary: ⌈log₂ 5⌉ = <b>3</b>. One-hot: <b>5</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>In one sentence each, define a Moore output and a Mealy output.</p></ask>
+<sol><p>A <b>Moore</b> output is a function of the current state only. A <b>Mealy</b> output is a function of the current state and the current inputs.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write the one-hot next-state equations for the overlapping 101 Moore detector (states S0 to S3, input X) and its output.</p></ask>
+<sol><p>Arrows into each state: S0 from S0 and S2 on 0: <b>D<sub>S0</sub> = X′(Q<sub>S0</sub> + Q<sub>S2</sub>)</b>. S1 on 1 from S0, S1 and S3: <b>D<sub>S1</sub> = X(Q<sub>S0</sub> + Q<sub>S1</sub> + Q<sub>S3</sub>)</b>. S2 on 0 from S1 and S3: <b>D<sub>S2</sub> = X′(Q<sub>S1</sub> + Q<sub>S3</sub>)</b>. S3 on 1 from S2: <b>D<sub>S3</sub> = X·Q<sub>S2</sub></b>. Output = <b>Q<sub>S3</sub></b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A state has two outgoing arrows labeled A and B (to different states) and no self-loop. What is wrong with the specification, and how would you fix it if A should have priority?</p></ask>
+<sol><p>The conditions overlap when A = B = 1 (not mutually exclusive) and nothing covers A = B = 0 (not all-inclusive). Fix: label the arrows <b>A</b> and <b>A′·B</b>, and add a self-loop labeled <b>A′·B′</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Using the divider of the worked example, how many cycles does dividing 20 by 6 take from INIT to DONE, and what are the results?</p></ask>
+<sol><p>Quotient 3, remainder 2. Cycles: INIT, then (TEST, SUB) three times, then a final TEST that sees the borrow, then DONE: 1 + 6 + 1 = <b>8 cycles</b> before entering DONE.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Design a Moore machine whose output is 1 when the input X has been 1 for three or more consecutive cycles. Use four states encoded 00 (no 1s), 01, 10, 11 (three or more) and derive D<sub>1</sub>, D<sub>0</sub> and the output.</p></ask>
+<sol><p>On X = 0 every state goes to 00; on X = 1 the count advances and saturates at 11. Transition table rows (Q<sub>1</sub>Q<sub>0</sub>, X → next): 00,1 → 01; 01,1 → 10; 10,1 → 11; 11,1 → 11; any,0 → 00. K-maps give <b>D<sub>1</sub> = X·(Q<sub>1</sub> + Q<sub>0</sub>)</b>, <b>D<sub>0</sub> = X·(Q<sub>1</sub> + Q<sub>0</sub>′)</b>, and the output <b>F = Q<sub>1</sub>·Q<sub>0</sub></b>. Check 01,1: D<sub>1</sub> = 1, D<sub>0</sub> = 1·(0 + 0) = 0 → 10 ✓.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Draw (in words) the Moore state machine for the overlapping pattern 1011: give each state's meaning and its transitions on 0 and 1.</p></ask>
+<sol><p>Sinit (nothing): 1 → S1, 0 → Sinit. S1 (seen 1): 0 → S10, 1 → S1. S10: 1 → S101, 0 → Sinit. S101: 1 → S1011, 0 → S10 (the input ends in 10). <b>S1011 (output 1)</b>: 1 → S1 (ends in 1; 11 is not a prefix), 0 → S10 (ends in 10). Five states.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Feed the input sequence 0, 1, 0, 1, 0, 1, 1 (one bit per cycle) into the Moore and Mealy 101 detectors. In which cycles is each output 1?</p></ask>
+<sol><p>Matches end at the inputs in positions 4 and 6 (1-based: the bits 1 0 1 at 2–4 and the overlapping 1 0 1 at 4–6). The <b>Mealy</b> output is 1 during cycles <b>4 and 6</b>, while the final 1 is present. The <b>Moore</b> output is 1 during cycles <b>5 and 7</b>, the cycles after those inputs are clocked in.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Minimize this Moore machine (output in parentheses; next states for X = 0, X = 1): A(0): A, B. B(0): C, B. C(0): A, D. D(1): E, B. E(0): A, D.</p></ask>
+<sol><p>Group by output: {A, B, C, E} and {D}. Split by next-state groups: C and E both go to (group 1, D) while A and B go to (group 1, group 1), giving {A, B}, {C, E}, {D}. A goes to (A, B) and B to (C, B): different groups for X = 0, so split: {A}, {B}, {C, E}, {D}. C and E agree, so <b>C ≡ E</b>. The minimal machine has <b>4 states</b>; it is the 101 detector.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>The pump controller gets an extra input KILL that forces the pump off immediately and keeps it off while KILL = 1. Modify the next-state equation and say whether the output should be Moore or Mealy.</p></ask>
+<sol><p><b>D = KILL′·(Q′·L′ + Q·H′)</b>. If the output stays Moore (pump = Q), the pump stops at the next clock edge after KILL rises. If it must stop immediately, use a Mealy output <b>pump = Q·KILL′</b>. With a fast clock the difference is negligible, and the Moore form avoids glitches on the motor drive.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a two-requester arbiter with alternating priority. Inputs R<sub>1</sub>, R<sub>0</sub>; outputs G<sub>1</sub>, G<sub>0</sub> (at most one grant, combinational from the current state and requests). When both request, grant the one that did not receive the most recent grant. Give the state, the grant equations and the next-state equation.</p></ask>
+<sol><p>One state bit P records who has priority (P = 0: requester 0). Grants: <b>G<sub>0</sub> = R<sub>0</sub>·(R<sub>1</sub>′ + P′)</b>, <b>G<sub>1</sub> = R<sub>1</sub>·(R<sub>0</sub>′ + P)</b>: a lone request is always granted, and a tie goes to the priority holder. After a grant, priority passes to the other side: <b>P* = G<sub>0</sub> + G<sub>1</sub>′·P</b> (set when 0 is granted, clear when 1 is granted, hold when nobody is). The grant outputs are Mealy outputs of a one-bit FSM. This is a two-input round-robin arbiter.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A controller has 12 states. Compare a binary and a one-hot implementation in flip-flops and in the complexity of each next-state equation, and say which you would choose for an FPGA and why.</p></ask>
+<sol><p>Binary: <b>4 flip-flops</b>, but each D input is a function of 4 state bits plus the inputs, often needing several logic levels. One-hot: <b>12 flip-flops</b>, and each D<sub>S</sub> is an OR of a few (state bit · condition) terms, one per incoming arrow. On an FPGA, flip-flops are plentiful (one per logic cell) and each LUT has a limited number of inputs, so one-hot usually gives fewer logic levels and a faster clock; it is the default for FPGA synthesis tools.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A traffic controller has states MG (main road green), MY, SG (side road green), SY. A side-road sensor S and a timer signal T (1 when the current state's minimum time has elapsed; the timer restarts on every state change) are inputs. Main stays green until a car waits and the minimum time has passed; yellows last one timer interval; side green ends when the timer expires or no car is waiting. Write the transition conditions and the one-hot next-state equations.</p></ask>
+<sol><p>Transitions: MG → MY on S·T, else stay. MY → SG on T, else stay. SG → SY on T + S′, else stay. SY → MG on T, else stay. One-hot: <b>D<sub>MG</sub> = Q<sub>MG</sub>·(S·T)′ + Q<sub>SY</sub>·T</b>; <b>D<sub>MY</sub> = Q<sub>MG</sub>·S·T + Q<sub>MY</sub>·T′</b>; <b>D<sub>SG</sub> = Q<sub>MY</sub>·T + Q<sub>SG</sub>·S·T′</b>; <b>D<sub>SY</sub> = Q<sub>SG</sub>·(T + S′) + Q<sub>SY</sub>·T′</b>. The timer is a datapath counter that the controller restarts whenever the state changes: an FSM and a counter working together.</p></sol>
+</prob>
+</practice>
+</module>

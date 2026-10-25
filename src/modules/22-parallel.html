@@ -1,0 +1,197 @@
+<module id="parallel" num="22" part="5" title="Parallel processors and GPUs" short="Parallelism and GPUs" pre="perf,caches" blurb="Why computing went parallel, multicore cache coherence and synchronization with atomics, SIMD, and how GPUs run tens of thousands of threads: warps and SIMT execution, the CUDA programming model, shared memory, coalescing, occupancy, and the roofline model.">
+
+<p>For thirty years single-thread performance improved by roughly 50% per year, from faster clocks and smarter pipelines. Around 2005 that curve flattened: supply voltage stopped scaling, so higher clock frequencies meant unmanageable power density (<ref to="cmos"/>), and programs ran out of instruction-level parallelism to exploit (<ref to="perf"/>). Transistor counts kept growing, so the extra transistors went into parallel hardware: more cores per chip, wider vector units, and massively parallel processors such as GPUs. This module covers how that hardware works and what it asks of the programmer.</p>
+
+<h3>Forms of parallelism</h3>
+<ul>
+<li><b>Instruction-level</b>: overlapping independent instructions inside one core (pipelining, superscalar and out-of-order execution).</li>
+<li><b>Data-level</b>: applying the same operation to many data elements at once (SIMD vector units, GPUs).</li>
+<li><b>Thread- or task-level</b>: running independent instruction streams on separate cores (multicore processors, clusters).</li>
+</ul>
+<p>Flynn's classic taxonomy names machines by their instruction and data streams: SISD (a simple uniprocessor), SIMD (one instruction applied to a vector of data), MIMD (independent cores, each with its own program counter) and the rarely used MISD. GPUs follow a hybrid that NVIDIA calls <b>SIMT</b> (single instruction, multiple threads): programs are written as independent threads, but the hardware executes them in groups that share one instruction stream.</p>
+
+<h3>Shared-memory multiprocessors and coherence</h3>
+<p>A multicore processor has several cores, each with private L1 and usually L2 caches, sharing a last-level cache and main memory. Because each private cache can hold its own copy of a line, a write by one core could leave stale copies in others. A <b>cache coherence protocol</b> prevents that by guaranteeing that all cores see a single, consistent order of writes to each location. The widely used <b>MESI</b> protocol tracks each line in each cache in one of four states:</p>
+<grid>State | Meaning | Local read | Local write | Another core reads | Another core writes
+M (Modified) | only valid copy, differs from memory | hit | hit | supply the data, write back, go to S | supply or write back, go to I
+E (Exclusive) | only copy, clean | hit | hit, go to M with no bus traffic | go to S | go to I
+S (Shared) | clean; other caches may also hold it | hit | invalidate other copies, go to M | stay S | go to I
+I (Invalid) | not present | miss; go to E if no other cache has it, else S | miss; read for ownership, go to M | — | —</grid>
+<p>Small systems implement coherence by <b>snooping</b>: every cache watches a shared bus or ring for other cores' requests. Large systems use a <b>directory</b> that records which caches hold each line, so invalidations go only where needed.</p>
+<p>Coherence works on whole lines, which creates a performance trap. If two cores repeatedly write two <i>different</i> variables that happen to share a cache line, every write invalidates the other core's copy, and the line bounces between them at the cost of a coherence miss each time. This is <b>false sharing</b>.</p>
+<diagram name="false_sharing">False sharing. The variables are unrelated, but the hardware cannot tell, because it tracks ownership per line.</diagram>
+<pre lang="cpp">struct alignas(64) PaddedCounter {   // each counter gets its own 64-byte line
+    std::atomic<long> value{0};
+};
+PaddedCounter per_thread[8];</pre>
+
+<h3>Synchronization and atomic operations</h3>
+<p>When threads share data, ordinary loads and stores are not enough. The statement <code>counter++</code> is a load, an add and a store; if two threads interleave them, one increment can be lost. If two threads each increment a shared counter 1000 times without synchronization, the final value can be anything from 2 to 2000. Such a <b>data race</b> is a bug, and in C and C++ it is formally undefined behavior.</p>
+<p>Hardware provides <b>atomic read-modify-write</b> instructions that perform a load and a store as one indivisible operation, with the coherence protocol holding the line exclusively in between: fetch-and-add, exchange, and <b>compare-and-swap</b> (CAS: write a new value only if the location still holds an expected value), or the load-linked/store-conditional pair on RISC architectures. Locks, semaphores and lock-free data structures are all built from these.</p>
+<p>A second issue is <b>ordering</b>. Compilers and processors reorder independent memory operations for speed, so another core may observe one thread's writes in a different order than they were written. Languages expose this through a memory model. In C++, <code>std::atomic</code> operations are sequentially consistent by default, and the weaker <b>release</b>/<b>acquire</b> pair is enough for the most common pattern, handing data from one thread to another:</p>
+<pre lang="cpp">#include <atomic>
+#include <cassert>
+
+int payload;                                      // ordinary data
+std::atomic<bool> ready{false};
+
+void producer() {
+    payload = 42;                                 // 1. write the data
+    ready.store(true, std::memory_order_release); // 2. publish: earlier writes become visible first
+}
+
+void consumer() {
+    while (!ready.load(std::memory_order_acquire)) { }  // 3. wait for the flag
+    assert(payload == 42);                        // 4. guaranteed to see the data
+}
+
+std::atomic<int> counter{0};
+void work() { for (int k = 0; k < 1000; ++k) counter.fetch_add(1); }  // no lost updates</pre>
+<warn><p><code>volatile</code> is not a synchronization mechanism between threads in C or C++: it prevents the compiler from removing or caching accesses, but it does not make them atomic and does not order them with respect to other memory operations or other cores. It is the right tool for memory-mapped device registers and for variables shared with interrupt handlers on a single-core microcontroller (<ref to="interrupts"/>); between threads, use atomics or locks.</p></warn>
+
+<h3>SIMD vector units</h3>
+<p>A SIMD instruction operates on a short vector held in a wide register: with 256-bit AVX registers, one instruction adds eight pairs of 32-bit floats. Compilers vectorize simple loops automatically when iterations are independent and data is contiguous; intrinsics or annotations handle harder cases. SIMD exploits data parallelism within one core at low cost, since the control logic (fetch, decode, scheduling) is shared across all lanes.</p>
+
+<h3>GPUs: designed for throughput</h3>
+<p>A CPU core is built to make a single thread fast: large caches, branch prediction and out-of-order execution all reduce the latency of one instruction stream. A GPU makes the opposite trade. It spends its transistors on arithmetic units, thousands of them, and tolerates latency instead of avoiding it: each processor holds many threads at once, and when one group of threads waits for memory, the scheduler simply issues instructions from another group in the next cycle. With enough threads in flight, the arithmetic units stay busy even though each individual memory access takes hundreds of cycles.</p>
+<p>A GPU consists of many <b>streaming multiprocessors</b> (SMs). Each SM has warp schedulers, a large register file (so that thousands of threads can keep their state on-chip and switching between them costs nothing), integer and floating-point lanes, specialized matrix units (tensor cores), load/store units, and an on-chip memory that serves as L1 cache and programmer-managed <b>shared memory</b>.</p>
+<diagram name="gpu_sm">A simplified SM. A large GPU has on the order of a hundred SMs; NVIDIA's GA100 die, for example, has 128.</diagram>
+<p>Threads are executed in <b>warps</b> of 32. All threads of a warp execute the same instruction at the same time, each on its own data and registers. When threads of one warp take different sides of a branch, the warp executes both paths one after the other, disabling the lanes that did not take each path. This <b>branch divergence</b> wastes lanes; code whose branches are uniform across each warp (for example, conditions that depend on the warp index rather than on individual thread data) avoids it.</p>
+<diagram name="warp_divergence">Divergence inside a warp. Execution time is the sum of both paths, with idle lanes in each.</diagram>
+
+<h3>The CUDA programming model</h3>
+<p>A CUDA program runs on a host CPU and launches <b>kernels</b>, functions executed by many GPU threads in parallel. A launch creates a <b>grid</b> of <b>thread blocks</b>; each block contains up to 1024 threads that run on the same SM, can share that SM's shared memory, and can synchronize with each other. Blocks are independent: the hardware runs them in any order, on any SM, which is what lets the same program scale across GPUs of different sizes.</p>
+<diagram name="cuda_hier">Each thread computes which data element it owns from its block and thread indices.</diagram>
+<pre lang="cuda">__global__ void vadd(const float *a, const float *b, float *c, int n)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;   // this thread's element
+    if (i < n)                                       // the last block may be partly empty
+        c[i] = a[i] + b[i];
+}
+
+// host side: one thread per element, 256 threads per block
+int threads = 256;
+int blocks  = (n + threads - 1) / threads;           // round up
+vadd<<<blocks, threads>>>(d_a, d_b, d_c, n);</pre>
+<p>The arrays d_a, d_b and d_c live in the GPU's own DRAM (global memory), allocated with <code>cudaMalloc</code> and filled with <code>cudaMemcpy</code> across the PCIe or NVLink connection, or managed automatically with unified memory. Transfers between host and device are slow compared with GPU memory bandwidth, so efficient programs keep data on the GPU across many kernels.</p>
+<p><b>Shared memory</b> is fast on-chip storage visible to all threads of a block. The standard pattern is to load a tile of data from global memory into shared memory, synchronize, and then let every thread reuse it many times. A parallel sum (reduction) shows both shared memory and synchronization:</p>
+<pre lang="cuda">__global__ void block_sum(const float *in, float *out, int n)
+{
+    __shared__ float s[256];                         // one slot per thread of the block
+    int tid = threadIdx.x;
+    int i   = blockIdx.x * blockDim.x + tid;
+    s[tid] = (i < n) ? in[i] : 0.0f;
+    __syncthreads();                                 // all loads done before anyone reads s[]
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        if (tid < stride)
+            s[tid] += s[tid + stride];               // halve the number of partial sums
+        __syncthreads();
+    }
+    if (tid == 0)
+        out[blockIdx.x] = s[0];                      // one result per block
+}</pre>
+<p>Each step halves the number of active threads, so a block of 256 sums its values in log₂ 256 = 8 steps rather than 255 sequential additions; a second kernel (or atomics) combines the per-block results.</p>
+
+<h3>Feeding the GPU: coalescing and occupancy</h3>
+<p>GPU memory performance depends on access patterns at the level of a warp. When the 32 threads of a warp access consecutive addresses, the hardware <b>coalesces</b> them into a few wide transactions; scattered or strided accesses need many transactions for the same amount of useful data.</p>
+<diagram name="coalescing">Stride-1 accesses fill each memory transaction with useful data; a stride of 2 wastes half of every transaction.</diagram>
+<p>This is why GPU code favors <b>structure-of-arrays</b> layouts (separate arrays of x, y and z) over arrays of structures when a kernel reads one field, the same advice as for CPU caches (<ref to="caches"/>) but with a larger penalty.</p>
+<p><b>Occupancy</b> is the number of warps resident on an SM relative to its maximum. More resident warps give the scheduler more chances to hide latency. Occupancy is limited by whichever per-SM resource runs out first: registers (a kernel using many registers per thread allows fewer threads), shared memory per block, or the maximum number of blocks and threads per SM. Maximum occupancy is not always necessary, but too little leaves the SM idle while waiting for memory.</p>
+<p>How much parallelism is enough? <b>Little's law</b>, a result from queueing theory, answers this. In any steady-state system, the average number of items inside equals the rate at which they arrive multiplied by the average time each one spends inside. Applied to a memory system, the amount of data that must be <i>in flight</i> (requested but not yet returned) to sustain a bandwidth B when each request takes latency L is the product of the two:</p>
+<eq c>data in flight = bandwidth × latency</eq>
+<p>A GPU with 2 TB/s of bandwidth and a loaded memory latency of 500 ns needs 2 × 10¹² B/s × 500 × 10⁻⁹ s = <b>1 MB</b> of requests outstanding at every moment. Spread over 100 SMs, that is 10 KB per SM, or 2500 four-byte loads. An SM holding its maximum of 2048 threads cannot reach that if each thread issues one 4-byte load and waits for it before issuing the next. Fast kernels therefore give each thread several <i>independent</i> loads in flight, by unrolling loops so that loads are issued before earlier results are used, or by using 8- and 16-byte vector loads (<code>float2</code>, <code>float4</code>). Occupancy is one way to supply concurrency, and instruction-level parallelism within each thread is the other. The same law limits CPUs: a core can track only a fixed number of outstanding cache misses, which caps the bandwidth a single thread can draw no matter how fast the memory is.</p>
+<p>Shared memory has its own access rule. It is divided into 32 <b>banks</b>, each 4 bytes wide, with successive 4-byte words in successive banks: word w lives in bank w mod 32. Each bank delivers one word per cycle, so a warp's access completes in one pass only if its 32 threads touch 32 different banks, or read the same word, which is broadcast to all of them. When k threads access different words in the same bank, the hardware replays the access k times: a <b>k-way bank conflict</b>. Stride-1 access, <code>s[tid]</code>, is conflict free. <code>s[2*tid]</code> places two threads in each even-numbered bank, a 2-way conflict. Reading down a column of a 32 × 32 tile, <code>s[tid][c]</code>, places all 32 threads in bank c, a 32-way conflict, because every row is 32 words long and starts in bank 0. The standard fix is padding: declared as <code>s[32][33]</code>, element (r, c) is word 33r + c, in bank (r + c) mod 32, so the 32 elements of any column fall in 32 different banks at the cost of 32 unused words.</p>
+
+<h3>Matrix engines and precision</h3>
+<p>Dense linear algebra, the core of neural-network training and inference, maps well onto GPUs because matrix multiplication performs many operations per byte loaded. Modern GPUs add <b>tensor cores</b> that compute small matrix products (for example a 4 × 4 × 4 multiply-accumulate) in one instruction, in reduced precisions such as FP16, BF16 or FP8 with FP32 accumulation. The formats of <ref to="float"/> matter here: BF16 keeps FP32's exponent range with fewer mantissa bits, which suits training, while narrower formats double throughput again at the cost of precision.</p>
+
+<h3>The roofline model</h3>
+<p>Whether a kernel is limited by computation or by memory traffic depends on its <b>arithmetic intensity</b>: floating-point operations performed per byte moved to or from DRAM. Attainable performance is the lower of the processor's peak compute rate and its memory bandwidth multiplied by the intensity.</p>
+<eq c>attainable FLOP/s = min( peak FLOP/s,  memory bandwidth × arithmetic intensity )</eq>
+<diagram name="roofline">A roofline for a GPU with 60 TFLOP/s of compute and 2 TB/s of memory bandwidth. Below 30 FLOP per byte, memory bandwidth is the limit.</diagram>
+<p>Vector addition performs one addition per 12 bytes (two 4-byte loads and one 4-byte store), an intensity of 1/12: at 2 TB/s it can reach only about 0.17 TFLOP/s, under 0.3% of peak, no matter how it is written. A large matrix multiplication with good tiling reuses each loaded element many times, reaches high intensity, and runs near the compute peak. The roofline tells an engineer which optimization matters: for a memory-bound kernel, reduce or reuse data movement (tiling into shared memory, fusing kernels, smaller data types); for a compute-bound one, use better instructions (tensor cores) or fewer operations.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Power and ILP limits turned extra transistors into parallel hardware: multicore, SIMD and GPUs.</li>
+<li>Coherence (MESI: Modified, Exclusive, Shared, Invalid) keeps private caches consistent per line; false sharing makes unrelated writes conflict.</li>
+<li>Data races lose updates; use atomic read-modify-write operations or locks, and release/acquire ordering to publish data. <code>volatile</code> is not thread synchronization.</li>
+<li>GPUs hide latency with massive multithreading; warps of 32 threads execute in lockstep (SIMT), and divergent branches serialize.</li>
+<li>CUDA: kernels launch grids of blocks of threads; i = blockIdx.x·blockDim.x + threadIdx.x; shared memory and __syncthreads() enable cooperation within a block.</li>
+<li>Coalesced, stride-1 access and adequate occupancy keep the memory system and the SMs busy.</li>
+<li>Little's law: data in flight = bandwidth × latency. Hiding latency needs enough independent requests outstanding, from many warps, several loads per thread, or wider loads.</li>
+<li>Shared memory has 32 four-byte banks; threads of a warp accessing different words in one bank serialize. Pad 2-D tiles (for example [32][33]) to make column access conflict free.</li>
+<li>Roofline: performance = min(peak, bandwidth × intensity). Low-intensity kernels are memory bound.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>A CUDA kernel is launched with 256 threads per block. Which global element does thread 17 of block 3 handle?</p></ask>
+<sol><p>i = 3 × 256 + 17 = <b>785</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Classify in Flynn's taxonomy: (a) an 8-core CPU running different programs on each core; (b) an AVX instruction adding eight floats; (c) a GPU warp.</p></ask>
+<sol><p>(a) <b>MIMD</b>; (b) <b>SIMD</b>; (c) <b>SIMT</b>, a form of SIMD in which each lane is programmed as an independent thread with its own registers.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>How many blocks of 256 threads are needed for n = 1,000,000 elements? Why does the kernel need the test <code>if (i &lt; n)</code>?</p></ask>
+<sol><p>⌈1,000,000/256⌉ = <b>3907</b> blocks, which launch 1,000,192 threads. The last 192 threads have no element; without the bounds check they would read and write past the end of the arrays.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Core 0 reads a line that no cache holds, then writes it; then core 1 reads the same line. Give the MESI state of the line in each cache after each step.</p></ask>
+<sol><p>Core 0 read: core 0 <b>E</b>. Core 0 write: core 0 <b>M</b>, with no bus traffic, because no other copy exists. Core 1 read: core 0 supplies the data and writes it back; both caches hold it in <b>S</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What is the arithmetic intensity of single-precision vector addition c[i] = a[i] + b[i], and what performance can it reach on a GPU with 2 TB/s of memory bandwidth?</p></ask>
+<sol><p>1 FLOP per 12 bytes: <b>1/12 FLOP/B</b>. 2 × 10¹² B/s × 1/12 ≈ <b>167 GFLOP/s</b>, a tiny fraction of the compute peak: the kernel is memory bound.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Two threads each execute <code>counter++</code> 1000 times on a shared <code>int</code> with no synchronization. Explain how updates are lost, and show that the final value can be as low as 2. Give two correct fixes.</p></ask>
+<sol><p>Each increment is load, add, store. If thread A loads the value, thread B performs several complete increments, and A then stores its stale value + 1, B's increments vanish. A worst case: A loads 0; B runs 999 increments (counter = 999); A stores 1; B loads 1; A runs its remaining 999 increments (counter = 1000); B stores 2. Final value <b>2</b>. Fixes: <code>std::atomic&lt;int&gt;</code> with <code>fetch_add</code>, or protect the increment with a mutex (or give each thread its own counter and sum at the end, which is also fastest).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>In a warp, threads with even <code>threadIdx.x</code> take the if path (cost 100 cycles) and odd ones take the else path (cost 60 cycles). How long does the warp take? What if the condition were <code>(threadIdx.x / 32) % 2 == 0</code> instead?</p></ask>
+<sol><p>Every warp contains both even and odd threads, so each warp executes both paths: <b>160 cycles</b>, with half the lanes idle each time. With the warp-level condition, all threads in a warp agree: each warp takes <b>100 or 60 cycles</b>, and no lanes are wasted.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An SM has 65,536 registers and supports at most 64 resident warps. A kernel uses 64 registers per thread. What is the maximum occupancy? What if it used 32 registers?</p></ask>
+<sol><p>65,536/64 = 1024 threads = 32 warps → <b>50%</b> occupancy. With 32 registers: 2048 threads = 64 warps → <b>100%</b> (if no other limit applies). Reducing register use, for example by recomputing values, can raise occupancy, at the risk of spilling to slower memory.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>On the GPU of the roofline figure (60 TFLOP/s, 2 TB/s), what performance does a kernel with intensity 8 FLOP/B reach, and what intensity is needed to become compute bound?</p></ask>
+<sol><p>min(60, 2 × 8) = <b>16 TFLOP/s</b>: memory bound. The ridge point is 60/2 = <b>30 FLOP/B</b>; above it the kernel is limited by compute.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Multiplying two N × N single-precision matrices performs 2N³ operations and, with perfect reuse, moves 3N² values. What is its best-case arithmetic intensity, and is N = 4096 compute bound on the example GPU?</p></ask>
+<sol><p>2N³/(3N² × 4 bytes) = <b>N/6 FLOP/B</b>. For N = 4096: about <b>683 FLOP/B</b>, far above the ridge at 30, so a well-tiled implementation is compute bound. Without tiling, data is reloaded many times and the effective intensity, and performance, collapse.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A kernel reads only the x field of an array of <code>struct { float x, y, z, w; }</code>. Compared with a separate array of x values, how many times more memory traffic does each warp generate?</p></ask>
+<sol><p>Consecutive threads read addresses 16 bytes apart, so the 32 x values of a warp are spread over 512 bytes instead of 128: about <b>4 times</b> the traffic (and transactions), three quarters of it unused. Converting to a structure of arrays restores fully coalesced access.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A GPU has 3 TB/s of memory bandwidth, a loaded memory latency of 600 ns, and 132 SMs, each holding up to 2048 threads. How many bytes must each SM keep in flight to use the full bandwidth? How many independent 4-byte loads must each thread have outstanding at full occupancy?</p></ask>
+<sol><p>Little's law: 3 × 10¹² B/s × 600 × 10⁻⁹ s = 1.8 MB in flight across the chip, or 1.8 MB/132 ≈ <b>13.6 KB per SM</b>. Divided among 2048 threads that is about 6.7 bytes per thread, so each thread needs <b>at least two</b> independent 4-byte loads outstanding (or one 8-byte vector load). With fewer resident threads, each thread needs proportionally more.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A CPU core can track 12 outstanding cache misses, each for a 64-byte line, and memory latency is 80 ns. What is the most memory bandwidth one core can draw? Why can a single thread not saturate a memory system rated at 100 GB/s?</p></ask>
+<sol><p>Bandwidth = data in flight/latency = 12 × 64 B/80 ns = <b>9.6 GB/s</b>. The core runs out of miss-tracking entries (often called line fill buffers) long before the memory runs out of bandwidth; reaching 100 GB/s takes about ten cores' worth of outstanding misses. Hardware prefetchers help a single thread only by keeping those entries busy.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A transpose kernel loads a 32 × 32 tile into <code>__shared__ float t[32][32]</code> by rows and then reads it by columns: thread i of a warp reads <code>t[i][c]</code>. What bank conflict does the column read cause? Show that declaring <code>t[32][33]</code> removes it.</p></ask>
+<sol><p>Element (i, c) of the unpadded tile is word 32i + c, in bank (32i + c) mod 32 = c for every i: all 32 threads hit one bank, a <b>32-way conflict</b>, so the read takes 32 passes. With rows of 33 words, element (i, c) is word 33i + c, in bank (i + c) mod 32, which is different for each i = 0 … 31: <b>no conflict</b>. The row-wise load stays conflict free as well, since consecutive threads still access consecutive words.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>In the producer/consumer example, suppose both atomic operations used <code>memory_order_relaxed</code>. What could go wrong, and why do release and acquire prevent it?</p></ask>
+<sol><p>Relaxed atomics guarantee only that the flag itself is updated atomically; they impose no ordering on other memory operations. The compiler or hardware could make the store to <code>ready</code> visible before the store to <code>payload</code>, or the consumer could read <code>payload</code> before its read of <code>ready</code> completes, so the consumer may see <code>ready == true</code> and still read the old payload. A release store guarantees that all earlier writes by the producer become visible before the flag; an acquire load guarantees that later reads by the consumer happen after it. Together they create a happens-before relationship from the write of payload to its read.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A memory-bound kernel runs on a CPU with 100 GB/s of memory bandwidth and on a GPU with 2 TB/s. The GPU also has 30 times the CPU's peak FLOP rate. Estimate the speedup, and explain why the FLOP ratio is irrelevant here.</p></ask>
+<sol><p>For a memory-bound kernel, time ≈ bytes moved/bandwidth, so the speedup is the bandwidth ratio: 2000/100 = <b>about 20×</b> (ignoring the cost of copying data to the GPU, which can erase the gain for a single short kernel). The FLOP ratio would matter only for compute-bound kernels to the right of both machines' ridge points.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>The block_sum reduction uses <code>if (tid &lt; stride)</code> with stride halving from 128. Why is this ordering better than the "interleaved" version that uses <code>if (tid % (2*stride) == 0)</code> with stride doubling from 1? Consider both divergence and shared-memory access.</p></ask>
+<sol><p>With <code>tid &lt; stride</code>, the active threads are always a contiguous range starting at 0, so whole warps are either fully active or fully idle: there is no divergence until fewer than 32 threads remain, and idle warps retire early. Consecutive threads also access consecutive shared-memory words, avoiding bank conflicts. The interleaved version leaves scattered threads active in every warp (divergence at every step) and accesses words with growing strides, which causes bank conflicts.</p></sol>
+</prob>
+</practice>
+</module>

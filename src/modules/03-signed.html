@@ -1,0 +1,214 @@
+<module id="signed" num="3" part="1" title="Signed integers and binary arithmetic" short="Signed arithmetic" pre="numbers" blurb="The four ways hardware represents negative numbers, why two's complement won, extension and truncation, addition and subtraction with one adder, the exact rules for detecting overflow, shifts as multiplication and division, and the integer rules of C and C++ that follow from all of this.">
+
+<p>A binary number with n bits has 2ⁿ patterns. Unsigned arithmetic assigns them the values 0 to 2ⁿ − 1. To represent negative numbers, some of those patterns must be reassigned, and the choice of which patterns mean which negative values determines how complicated the arithmetic hardware becomes. This module compares the candidate systems, explains why nearly every processor uses two's complement, and then covers the arithmetic itself: addition, subtraction, overflow detection, extension, truncation and shifting. It ends with the integer rules of C and C++, which are a direct consequence of the hardware.</p>
+
+<h3>Four representations of signed numbers</h3>
+<h4>Sign-magnitude</h4>
+<p>The MSB is a sign bit (0 for +, 1 for −) and the remaining n − 1 bits hold the magnitude, just as people write −19. The range is −(2<sup>n−1</sup> − 1) to +(2<sup>n−1</sup> − 1), and there are two zeros, 0000 0000 (+0) and 1000 0000 (−0). Addition is awkward: to add numbers with different signs, the hardware must compare magnitudes, subtract the smaller from the larger and pick the sign, which needs a comparator and a subtractor as well as an adder. Sign-magnitude survives where it is natural, most importantly in the significand of floating-point numbers (<ref to="float"/>).</p>
+<h4>One's complement</h4>
+<p>A negative number is formed by inverting every bit of the positive number: +19 = 0001 0011, −19 = 1110 1100. The range is the same as sign-magnitude, and there are still two zeros (0000 0000 and 1111 1111). Addition almost works with a plain adder, except that a carry out of the MSB must be added back into the LSB ("end-around carry"). One's complement arithmetic survives in the Internet checksum used by IP, TCP and UDP.</p>
+<h4>Two's complement</h4>
+<def term="Two's complement">
+<p>A signed binary representation in which the MSB has weight −2<sup>n−1</sup> instead of +2<sup>n−1</sup>, and all other bits keep their usual positive weights. An n-bit two's complement number ranges from −2<sup>n−1</sup> to 2<sup>n−1</sup> − 1 and has exactly one zero.</p>
+</def>
+<grid cls="tt">Bit | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
+Weight | −128 | 64 | 32 | 16 | 8 | 4 | 2 | 1</grid>
+<p>So 1110 1101 = −128 + 64 + 32 + 8 + 4 + 1 = −19, and 0001 0011 = +19. A number is negative exactly when its MSB is 1. The range is asymmetric: 8 bits run from −128 to +127, because the pattern 1000 0000 that would have been −0 is used for −128 instead.</p>
+<h4>Excess (biased) representation</h4>
+<p>In <b>excess-B</b> (also called offset binary or biased) notation, a pattern whose unsigned value is u represents u − B. With 8 bits and B = 128, 0000 0000 means −128, 1000 0000 means 0 and 1111 1111 means +127. Its useful property is that the ordering of the bit patterns, read as unsigned numbers, matches the ordering of the values, so an unsigned comparator compares biased numbers correctly. The exponent field of IEEE floating point uses a bias for exactly this reason, and many ADCs output offset binary.</p>
+
+<h3>One pattern, five values</h3>
+<p>Since the bits carry no record of the system, the same pattern takes different values under each convention:</p>
+<grid cls="mono">8-bit pattern | Unsigned | Sign-magnitude | One's complement | Two's complement | Excess-128
+0000 0000 | 0 | +0 | +0 | 0 | −128
+0111 1111 | 127 | +127 | +127 | +127 | −1
+1000 0000 | 128 | −0 | −127 | −128 | 0
+1001 0011 | 147 | −19 | −108 | −109 | +19
+1111 1110 | 254 | −126 | −1 | −2 | +126
+1111 1111 | 255 | −127 | −0 | −1 | +127</grid>
+<p>Four two's complement patterns are worth memorizing: all zeros is 0, all ones is −1, a 1 followed by zeros is the most negative value, and a 0 followed by ones is the most positive. Use the <a href="#tool-numconv">number converter</a> in the previous module to check any pattern under all five readings.</p>
+
+<h3>Why two's complement won</h3>
+<p>Two's complement arithmetic is ordinary binary arithmetic modulo 2ⁿ. An n-bit adder computes the sum of two patterns and discards any carry out of the MSB, which is exactly addition modulo 2ⁿ. In two's complement, −x is represented by the pattern 2ⁿ − x, and modulo 2ⁿ the values x and x − 2ⁿ are the same residue. So adding the patterns for a and −b gives the pattern for a − b with no special cases: <b>the same adder circuit adds unsigned numbers and two's complement numbers</b>, and the result bits are correct for both interpretations whenever the true result fits.</p>
+<diagram name="twos_wheel">The 16 patterns of a 4-bit number arranged around a circle. Adding 1 moves one step clockwise in both interpretations. The unsigned values wrap between 1111 and 0000; the signed values wrap between 0111 and 1000. Those two boundaries are where unsigned and signed overflow happen.</diagram>
+<h4>Negation: invert and add 1</h4>
+<p>For any n-bit pattern x, x + x′ (x plus its bitwise complement) is all ones, which is 2ⁿ − 1. Therefore x′ + 1 = 2ⁿ − x, which is the two's complement pattern of −x. That gives the standard recipe:</p>
+<eq>−x = x′ + 1     (invert every bit, then add 1)</eq>
+<ex title="Negating 18 in 8 bits">
+<p>+18 = 0001 0010. Invert: 1110 1101. Add 1: <b>1110 1110</b> = 0xEE. Check with weights: −128 + 64 + 32 + 8 + 4 + 2 = −18.</p>
+<p>A shortcut that avoids the addition: scanning from the right, copy every bit up to and including the first 1, then invert all bits to its left. 0001 00<b>10</b> → keep "10", invert "000100" → 1110 11 + 10 = 1110 1110.</p>
+<p>The recipe works in both directions: inverting 1110 1110 gives 0001 0001, and adding 1 gives 0001 0010 = 18. This is how you read the magnitude of a negative two's complement number.</p>
+</ex>
+<warn>
+<p>Two different things are both called "two's complement". The <b>two's complement system</b> is the representation: a way of reading bit patterns. <b>Taking the two's complement</b> is an operation: invert and add 1, which negates a number. A negative number in the system is not "a positive number with the two's complement taken" unless you are computing it from its magnitude. Also, negating the most negative value overflows: in 8 bits, −(−128) gives 1000 0000 again, because +128 is not representable.</p>
+</warn>
+
+<h3>Extension and truncation</h3>
+<p>Moving a value to a wider register requires filling the new upper bits. To preserve the value:</p>
+<ul>
+<li><b>Zero extension</b> (for unsigned values) fills the new bits with 0.</li>
+<li><b>Sign extension</b> (for two's complement values) fills the new bits with copies of the old MSB.</li>
+</ul>
+<diagram name="sign_extend">Sign extension preserves the value of a negative number because the new MSB has weight −128, and −128 + 64 + 32 + 16 equals the old MSB's weight of −8. In hardware both kinds of extension cost nothing but wires.</diagram>
+<p>Why sign extension works: adding a 1 above the old MSB changes the MSB weight from −2<sup>k</sup> to −2<sup>k+1</sup>, and turning the old MSB into an ordinary bit of weight +2<sup>k</sup> compensates exactly: −2<sup>k+1</sup> + 2<sup>k</sup> = −2<sup>k</sup>. Repeating the argument covers any number of new bits.</p>
+<p><b>Truncation</b> drops upper bits. It preserves an unsigned value only if all dropped bits are 0, and it preserves a two's complement value only if all dropped bits are equal to the new MSB, i.e. the value already fits. Truncating 0000 0101 (+5) to 4 bits gives 0101 (+5); truncating 0001 0101 (+21) to 4 bits gives 0101 (+5), which is wrong; truncating 1111 1011 (−5) gives 1011 (−5), which is right.</p>
+
+<h3>Addition and subtraction</h3>
+<p>Binary addition works column by column like decimal addition, with a carry of 1 whenever a column sum reaches 2. In each column the possible sums are 0, 1, 2 (= 10₂, write 0 carry 1) and 3 (= 11₂, write 1 carry 1).</p>
+<pre>  carries   1 1 1 1
+            0 1 1 0 1     (13)
+          + 0 0 1 1 1     ( 7)
+            ---------
+            1 0 1 0 0     (20)</pre>
+<p>Subtraction reuses the adder: A − B = A + (−B) = A + B′ + 1. A circuit computes it by inverting B through XOR gates and setting the carry into the least significant column to 1, as <ref to="arith"/> shows at gate level.</p>
+<p>Hexadecimal addition works the same way with a carry whenever a column reaches 16: 0x3A + 0x2C: A + C = 22 = 16 + 6, write 6 carry 1; 3 + 2 + 1 = 6. The sum is <b>0x66</b> (58 + 44 = 102). For hex subtraction, borrow 16: 0x50 − 0x1F: 0 − F needs a borrow, 16 − 15 = 1; then 5 − 1 − 1 = 3. The result is <b>0x31</b> (80 − 31 = 49).</p>
+
+<h3>Overflow</h3>
+<p>An n-bit result can only hold n bits. <b>Overflow</b> means the true mathematical result does not fit in the representation being used, so the stored bits represent a different value. Whether a given addition overflowed depends on the interpretation, so the hardware reports two separate flags, and software chooses which to check.</p>
+<def term="Carry flag (C)">
+<p>The carry out of the most significant column of an addition. For unsigned addition, C = 1 means the result overflowed. For subtraction computed as A + B′ + 1, C = 0 means a borrow occurred (A &lt; B as unsigned numbers), so the unsigned result is wrong.</p>
+</def>
+<def term="Overflow flag (V)">
+<p>Signed (two's complement) overflow. It occurs exactly when two operands with the same sign produce a result with the opposite sign. In hardware, V = (carry into the MSB) ⊕ (carry out of the MSB).</p>
+</def>
+<p>Adding numbers of opposite signs can never overflow, because the result lies between the two operands. Overflow needs both operands to be large in the same direction. The carry-based formula follows from looking at the MSB column: if both operands are positive (MSBs 0) and a carry comes into the MSB, the sum's MSB becomes 1 (negative) and there is no carry out, so the two carries differ; if both are negative (MSBs 1) and no carry comes in, the MSB becomes 0 with a carry out, and again they differ. In every non-overflow case the two carries agree.</p>
+<grid cls="mono">4-bit addition | Result | C | Unsigned reading | V | Signed reading
+0110 + 0101 | 1011 | 0 | 6 + 5 = 11, correct | 1 | 6 + 5 gave −5: overflow
+1100 + 0101 | 0001 | 1 | 12 + 5 gave 1: overflow | 0 | −4 + 5 = 1, correct
+1001 + 1010 | 0011 | 1 | 9 + 10 gave 3: overflow | 1 | −7 + −6 gave +3: overflow
+0011 + 0100 | 0111 | 0 | 3 + 4 = 7, correct | 0 | 3 + 4 = 7, correct</grid>
+<ex title="Subtraction and the meaning of C">
+<p>7 − 5 in 4 bits: 0111 + 1010 + 1 = 1 0010. Result 0010 = 2, C = 1: no borrow, correct for both interpretations.</p>
+<p>5 − 7: 0101 + 1000 + 1 = 0 1110. Result 1110: as a signed number it is −2, which is correct (V = 0). As an unsigned number it reads 14, which is wrong; C = 0 signals the borrow, because 5 &lt; 7.</p>
+</ex>
+<tool name="adder"/>
+<prac>
+<p>Processors record these flags in a status register (on AVR microcontrollers, SREG holds C, Z, N, V and others) and conditional branches test them. "Branch if lower" for unsigned comparison tests C after a subtraction; "branch if less than" for signed comparison tests N ⊕ V. Compilers pick the instruction from the declared type, which is one reason signed and unsigned types must be declared correctly.</p>
+</prac>
+
+<h3>Shifts as multiplication and division</h3>
+<p>Shifting a binary number left by k positions multiplies it by 2<sup>k</sup>, just as appending zeros multiplies a decimal number by powers of ten. Shifting right divides by 2<sup>k</sup>, but what fills the vacated upper bits matters.</p>
+<diagram name="shifts">A <b>logical</b> right shift fills with zeros, which divides an unsigned number by two. An <b>arithmetic</b> right shift copies the sign bit, which divides a two's complement number by two and keeps it negative.</diagram>
+<p>The arithmetic right shift rounds toward −∞: −7 = 1001 shifted right once is 1100 = −4, because −3.5 rounds down to −4. Integer division in C and C++ rounds toward zero instead (−7 / 2 = −3), which is why compilers cannot replace a signed division by a single arithmetic shift; they add a correction for negative operands first. A left shift overflows when any bit shifted out, or the new sign bit, differs from what the true product needs: 0100 0000 (64) shifted left is 1000 0000, which is −128 as a signed byte.</p>
+
+<h3>How many bits a result needs</h3>
+<ul>
+<li>The sum of two n-bit unsigned numbers needs at most n + 1 bits. The sum of k such numbers needs n + ⌈log₂ k⌉ bits: three 4-bit numbers have a maximum sum of 3 × 15 = 45, which needs 6 bits.</li>
+<li>The product of an m-bit and an n-bit unsigned number needs m + n bits: 255 × 255 = 65,025 fits in 16 bits. The same holds for two's complement: (−128) × (−128) = 16,384 needs 16 signed bits.</li>
+</ul>
+
+<h3>Integers in C and C++</h3>
+<p>C and C++ map their integer operations straight onto the hardware above, with a few rules every embedded or systems programmer has to know.</p>
+<ul>
+<li><b>Unsigned arithmetic wraps</b> modulo 2ⁿ, by definition. <code>uint8_t x = 255; x++;</code> leaves x = 0.</li>
+<li><b>Signed overflow is undefined behavior</b>. The compiler may assume it never happens and optimize accordingly, so <code>if (x + 1 &lt; x)</code> can be deleted as always false. The hardware wraps, but the language makes no promise.</li>
+<li><b>Integer promotion:</b> operands narrower than <code>int</code> (char, short, uint8_t) are converted to <code>int</code> before any arithmetic. Results are computed in int and only truncated when stored.</li>
+<li><b>Usual arithmetic conversions:</b> if one operand is unsigned and the other signed of the same rank, the signed one is converted to unsigned, so −1 becomes the maximum unsigned value.</li>
+<li><b>Shifts:</b> shifting by the type's width or more is undefined, left-shifting a 1 into or past the sign bit of a signed type is undefined in C, and right-shifting a negative signed value was implementation-defined until C++20 (in practice, arithmetic). Use unsigned types for bit manipulation.</li>
+</ul>
+<pre lang="c">uint8_t a = 200, b = 100;
+int     s = a + b;      // 300: a and b are promoted to int before the addition
+uint8_t t = a + b;      // 44: 300 is truncated to its low 8 bits when stored (300 - 256)
+
+if (-1 < 0u) { }        // never taken: -1 is converted to unsigned (all ones), which is huge
+
+int16_t p = 300 * 300;  // with 16-bit int (AVR), 300 * 300 overflows int: undefined behavior
+int32_t q = 300L * 300; // the long operand forces a 32-bit multiplication: 90000
+
+uint32_t m = 1u << 31;  // fine. 1 << 31 with 32-bit int shifts into the sign bit: undefined in C</pre>
+<warn>
+<p>Mixing signed and unsigned in comparisons and loop bounds. <code>for (unsigned i = n - 1; i &gt;= 0; i--)</code> never terminates, because an unsigned value is always ≥ 0 and wraps from 0 to the maximum. Compilers warn about this with <code>-Wall -Wextra</code>; build with warnings on and treat them as errors in embedded code.</p>
+</warn>
+
+<h3>Summary</h3>
+<ul>
+<li>Two's complement gives the MSB weight −2<sup>n−1</sup>; range −2<sup>n−1</sup> to 2<sup>n−1</sup> − 1; one zero; negate by inverting and adding 1.</li>
+<li>One adder serves unsigned and signed numbers because both are arithmetic modulo 2ⁿ.</li>
+<li>Zero-extend unsigned values, sign-extend signed values; truncation is safe only if the value fits.</li>
+<li>Unsigned overflow: C = 1 after addition, C = 0 after subtraction. Signed overflow: same-sign operands give an opposite-sign result; V = c<sub>in,MSB</sub> ⊕ c<sub>out,MSB</sub>.</li>
+<li>Left shift multiplies by 2<sup>k</sup>; logical right shift divides unsigned values; arithmetic right shift divides signed values, rounding toward −∞.</li>
+<li>In C, narrow types promote to int, unsigned wraps, signed overflow is undefined, and signed operands convert to unsigned in mixed comparisons.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Give the range of an 8-bit number in unsigned, sign-magnitude and two's complement form. How many zeros does each have?</p></ask>
+<sol><p>Unsigned 0 to 255 (one zero). Sign-magnitude −127 to +127 (two zeros, +0 and −0). Two's complement −128 to +127 (one zero).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What decimal value does the 8-bit two's complement pattern 0xF6 represent?</p></ask>
+<sol><p>0xF6 = 1111 0110. The MSB is 1, so it is negative. Invert: 0000 1001; add 1: 0000 1010 = 10. The value is <b>−10</b>. (Or: 246 − 256 = −10.)</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Sign-extend the 6-bit two's complement number 101101 to 8 bits and give its value.</p></ask>
+<sol><p>Copy the MSB (1) into the two new bits: <b>1110 1101</b>. Value: −128 + 64 + 32 + 8 + 4 + 1 = <b>−19</b>, the same as the 6-bit value −32 + 8 + 4 + 1 = −19.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Write −37 in 8-bit two's complement, in binary and hex.</p></ask>
+<sol><p>+37 = 0010 0101. Invert: 1101 1010. Add 1: <b>1101 1011 = 0xDB</b>. Check: −128 + 64 + 16 + 8 + 2 + 1 = −37.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Give the value of the 8-bit pattern 1100 1000 as unsigned, sign-magnitude, one's complement, two's complement and excess-128.</p></ask>
+<sol><p>Unsigned 128 + 64 + 8 = <b>200</b>. Sign-magnitude: sign 1, magnitude 100 1000 = 72 → <b>−72</b>. One's complement: invert to 0011 0111 = 55 → <b>−55</b>. Two's complement: 200 − 256 = <b>−56</b>. Excess-128: 200 − 128 = <b>+72</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Add the 8-bit numbers 0x5C + 0x4A. Give the result in hex and state whether it overflows as unsigned and as signed.</p></ask>
+<sol><p>C + A = 12 + 10 = 22 = 0x16: write 6, carry 1. 5 + 4 + 1 = 10 = A. Result <b>0xA6</b>, no carry out. Unsigned: 92 + 74 = 166, fits (C = 0). Signed: both operands positive (MSB 0) but 0xA6 has MSB 1 (−90), so <b>signed overflow</b> (V = 1): the true sum 166 exceeds +127.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Compute 0x40 − 0x5B in 8 bits the way the hardware does. What are the result and the C flag, and what does C tell you?</p></ask>
+<sol><p>0x5B = 0101 1011, inverted 1010 0100. 0x40 + 0xA4 + 1 = 0xE5 with no carry out, so <b>result 0xE5, C = 0</b>. C = 0 means a borrow: as unsigned numbers 64 &lt; 91, so the unsigned result is wrong. As signed numbers 64 − 91 = −27, and 0xE5 = 229 − 256 = −27 is correct (V = 0).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Truncate each 8-bit two's complement value to 4 bits and say whether the value is preserved: 0000 0110, 1111 1010, 0001 1010, 1110 0101.</p></ask>
+<sol><p>0110: +6 → +6, <b>preserved</b> (dropped bits 0000 equal the new MSB 0). 1010: −6 → −6, <b>preserved</b> (dropped 1111 equal new MSB 1). 1010 from 0001 1010 (+26): becomes −6, <b>not preserved</b>. 0101 from 1110 0101 (−27): becomes +5, <b>not preserved</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using 4-bit two's complement, compute −3 − 5 and −8 − 1 the way an adder would. Show the carries into and out of the MSB and use them to decide overflow.</p></ask>
+<sol><p>−3 − 5 = 1101 + (0101)′ + 1 = 1101 + 1010 + 1. Adding: 1101 + 1011 = 1 1000. Carry into bit 3: bits 0–2 are 101 + 011 = 1000, so carry in = 1; carry out = 1. V = 1 ⊕ 1 = <b>0</b>: result 1000 = <b>−8</b>, correct. −8 − 1 = 1000 + 1110 + 1 = 1000 + 1111 = 1 0111. Carry into bit 3: 000 + 111 = 111, carry in = 0; carry out = 1. V = <b>1</b>: the result 0111 (+7) is wrong because −9 is below the range.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Explain, using x + x′ = 2ⁿ − 1, why inverting and adding 1 negates a two's complement number. Then explain why the same steps applied to −128 in 8 bits give −128.</p></ask>
+<sol><p>x + x′ is all ones, which is 2ⁿ − 1, so x′ + 1 = 2ⁿ − x. Modulo 2ⁿ, the pattern 2ⁿ − x is congruent to −x, so it is the two's complement encoding of −x. For x = −128 = 1000 0000: x′ = 0111 1111, and adding 1 gives 1000 0000 again. The mathematically correct +128 is congruent to −128 modulo 256, and +128 is outside the 8-bit range, so the negation overflows.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Three 4-bit unsigned numbers are added. How many bits must the sum have to never overflow? What about sixteen 4-bit numbers, and the product of a 4-bit and a 6-bit number?</p></ask>
+<sol><p>Three: max 45, which needs <b>6 bits</b> (n + ⌈log₂ 3⌉ = 4 + 2). Sixteen: max 16 × 15 = 240, which needs <b>8 bits</b> (4 + log₂ 16). Product: max 15 × 63 = 945 &lt; 1024, so <b>10 bits</b> (4 + 6).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>What do these C expressions evaluate to on a system with 32-bit int? (a) <code>(uint8_t)(250 + 10)</code>, (b) <code>-7 &gt;&gt; 1</code> (assume arithmetic shift), (c) <code>-7 / 2</code>, (d) <code>(int8_t)0x9C</code>.</p></ask>
+<sol><p>(a) 260 truncated to 8 bits: <b>4</b>. (b) Arithmetic shift rounds toward −∞: <b>−4</b>. (c) Division truncates toward zero: <b>−3</b>. (d) 0x9C = 156, read as a signed byte: 156 − 256 = <b>−100</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An 8-bit microcontroller compares two unsigned bytes by computing A − B and branching on the carry flag. For A = 0x30, B = 0x50, what are C, Z and N? Which branch, "lower" (C = 0) or "same or higher" (C = 1), is taken?</p></ask>
+<sol><p>0x30 + 0xAF + 1 = 0xE0, no carry out. <b>C = 0</b>, <b>Z = 0</b> (result not zero), <b>N = 1</b> (MSB of 0xE0). C = 0 means a borrow, so A &lt; B: the <b>"lower"</b> branch is taken, which is correct since 48 &lt; 80.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Prove that V = c<sub>n−1</sub> ⊕ c<sub>n</sub> (carry into the MSB XOR carry out of the MSB) detects two's complement overflow, by considering the four combinations of operand signs.</p></ask>
+<hint><p>Let a and b be the operand MSBs and c<sub>n−1</sub> the carry into the MSB column. The result MSB is s = a ⊕ b ⊕ c<sub>n−1</sub> and the carry out is c<sub>n</sub> = majority(a, b, c<sub>n−1</sub>).</p></hint>
+<sol><p><b>a = 0, b = 0</b> (both non-negative): c<sub>n</sub> = 0 and s = c<sub>n−1</sub>. Overflow means s = 1, which happens exactly when c<sub>n−1</sub> = 1 ≠ c<sub>n</sub>. <b>a = 1, b = 1</b> (both negative): c<sub>n</sub> = 1 and s = c<sub>n−1</sub>. Overflow means a non-negative result, s = 0, exactly when c<sub>n−1</sub> = 0 ≠ c<sub>n</sub>. <b>a ≠ b</b> (opposite signs): overflow is impossible, and indeed c<sub>n</sub> = majority(0, 1, c<sub>n−1</sub>) = c<sub>n−1</sub>, so V = 0. In all cases V = 1 exactly when overflow occurs.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>The function below is meant to detect signed overflow. Explain why it can fail after compiler optimization, and rewrite it so it is correct.</p>
+<pre lang="c">bool add_overflows(int a, int b) {
+    int s = a + b;
+    return (a > 0 && b > 0 && s < 0) || (a < 0 && b < 0 && s >= 0);
+}</pre></ask>
+<sol><p>If a + b overflows, the program has already executed undefined behavior, so the compiler may assume <code>a + b</code> never overflows and simplify the test (for example, conclude that a &gt; 0 and b &gt; 0 imply s &gt; 0, and delete the check). The test must not perform the overflowing addition. Either compare against the limits first, or use a compiler builtin:</p>
+<pre lang="c">bool add_overflows(int a, int b) {
+    return (b > 0 && a > INT_MAX - b) || (b < 0 && a < INT_MIN - b);
+}
+// GCC/Clang: int s; bool ovf = __builtin_add_overflow(a, b, &s);</pre>
+<p>Another correct approach is to add in unsigned arithmetic, which wraps by definition, and examine the sign bits.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An interviewer asks: "Implement x / 8 for a signed 32-bit int using shifts, matching C's rounding toward zero." Write the expression and explain the correction term.</p></ask>
+<sol><p>An arithmetic shift rounds toward −∞, so negative values that are not multiples of 8 come out one too low. Adding 7 (that is, 2³ − 1) to negative values before shifting turns floor into truncation:</p>
+<pre lang="c">int div8(int x) {
+    int bias = (x >> 31) & 7;    // 7 if x is negative, 0 otherwise (x >> 31 is all ones or zero)
+    return (x + bias) >> 3;
+}</pre>
+<p>Check: x = −9 gives (−9 + 7) &gt;&gt; 3 = −2 &gt;&gt; 3 = −1, and −9 / 8 = −1.125 truncates to −1. Without the bias, −9 &gt;&gt; 3 = −2. Compilers emit exactly this sequence for signed division by a power of two.</p></sol>
+</prob>
+</practice>
+</module>

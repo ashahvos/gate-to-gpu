@@ -1,0 +1,178 @@
+<module id="boolean" num="5" part="2" title="Logic gates and Boolean algebra" short="Boolean algebra" pre="digital" blurb="The eight standard gates and their truth tables, the axioms and numbered theorems of switching algebra with proofs, duality and De Morgan's laws, algebraic simplification that cites each step, and which sets of gates can build every function.">
+
+<p>Boolean algebra is the mathematics of variables that take only the values 0 and 1. Applied to circuits it is often called <b>switching algebra</b>, and it does two jobs: it describes exactly what a circuit computes, and it lets you transform one circuit into another that computes the same function with fewer gates, fewer levels or a different gate type. This module defines the basic gates, states the axioms and theorems with the numbering used in Wakerly's <i>Digital Design</i> (which many courses follow), proves the less obvious ones, and shows how to simplify expressions while justifying every step.</p>
+
+<h3>Gates and truth tables</h3>
+<p>A <b>logic gate</b> computes one Boolean function of its inputs. A <b>truth table</b> lists the output for every combination of inputs; with n inputs there are 2ⁿ rows, listed in binary counting order so that row i has the input bits of the number i.</p>
+<diagram name="gate_symbols">The distinctive-shape symbols used throughout this guide. A small circle (a <b>bubble</b>) on an input or output means inversion; that is the only difference between AND and NAND, OR and NOR, XOR and XNOR.</diagram>
+<truth h="A B | AND OR NAND NOR XOR XNOR">0 0 | 0 0 1 1 0 1; 0 1 | 0 1 1 0 1 0; 1 0 | 0 1 1 0 1 0; 1 1 | 1 1 0 0 0 1</truth>
+<ul>
+<li><b>AND</b> is 1 only when all inputs are 1; <b>OR</b> is 1 when at least one input is 1. Both extend to any number of inputs.</li>
+<li><b>NAND</b> and <b>NOR</b> are AND and OR followed by inversion. In CMOS they are the cheapest gates of all, cheaper than AND and OR, because a single CMOS stage naturally inverts (<ref to="cmos"/>).</li>
+<li><b>XOR</b> (exclusive OR) is 1 when its inputs differ. For more than two inputs, XOR is 1 when an <b>odd</b> number of inputs are 1, which makes it the parity function. <b>XNOR</b> is 1 when its two inputs are equal, so it is a one-bit equality comparator.</li>
+</ul>
+<p>XOR has properties worth memorizing because they recur in adders, comparators, error-detecting codes and bit-manipulation code: A ⊕ 0 = A; A ⊕ 1 = A′ (so XOR with a control bit is a <b>controlled inverter</b>); A ⊕ A = 0; A ⊕ A′ = 1; XOR is commutative and associative; and A ⊕ B = A·B′ + A′·B.</p>
+<tool name="gates"/>
+<p><b>Precedence.</b> In Boolean expressions NOT binds tightest, then AND, then OR, mirroring negation, multiplication and addition. A + B·C′ means A + (B·(C′)). Use parentheses whenever XOR is mixed with AND and OR, since conventions for its precedence vary.</p>
+<warn>
+<p>The C language does not follow the Boolean convention you might expect between bitwise operators and comparisons: <code>&amp;</code>, <code>^</code> and <code>|</code> all bind more loosely than <code>==</code>. <code>if (x &amp; MASK == 0)</code> parses as <code>x &amp; (MASK == 0)</code>. Always parenthesize: <code>if ((x &amp; MASK) == 0)</code>. <ref to="mcu"/> collects the other C pitfalls of bit manipulation.</p>
+</warn>
+<p><b>How many functions are there?</b> A truth table with 2ⁿ rows has 2ⁿ output bits, each of which can be 0 or 1, so there are 2<sup>2ⁿ</sup> distinct Boolean functions of n variables: 4 of one variable, 16 of two, 256 of three and 65,536 of four. The sixteen two-input functions include the constants 0 and 1, A, B, their complements, and the ten gates and implications above.</p>
+
+<h3>The axioms of switching algebra</h3>
+<p>Switching algebra starts from a variable X that is either 0 or 1, and three operations defined by the axioms below. Each axiom comes in a pair; the primed version is the <b>dual</b> of the unprimed one.</p>
+<grid>Axiom | Statement | Dual
+A1 | X = 0 if X ≠ 1 | A1′: X = 1 if X ≠ 0
+A2 | if X = 0 then X′ = 1 | A2′: if X = 1 then X′ = 0
+A3 | 0 · 0 = 0 | A3′: 1 + 1 = 1
+A4 | 1 · 1 = 1 | A4′: 0 + 0 = 0
+A5 | 0 · 1 = 1 · 0 = 0 | A5′: 1 + 0 = 0 + 1 = 1</grid>
+<p>Everything else follows from these. Note A3′: 1 + 1 = 1. The + here is OR, not arithmetic addition.</p>
+
+<h3>The theorems</h3>
+<grid>Theorem | Name | Statement | Dual
+T1 | identities | X + 0 = X | T1′: X · 1 = X
+T2 | null elements | X + 1 = 1 | T2′: X · 0 = 0
+T3 | idempotency | X + X = X | T3′: X · X = X
+T4 | involution | (X′)′ = X | (self-dual)
+T5 | complements | X + X′ = 1 | T5′: X · X′ = 0
+T6 | commutativity | X + Y = Y + X | T6′: X · Y = Y · X
+T7 | associativity | (X + Y) + Z = X + (Y + Z) | T7′: (X·Y)·Z = X·(Y·Z)
+T8 | distributivity | X·Y + X·Z = X·(Y + Z) | T8′: (X + Y)·(X + Z) = X + Y·Z
+T9 | covering | X + X·Y = X | T9′: X·(X + Y) = X
+T10 | combining | X·Y + X·Y′ = X | T10′: (X + Y)·(X + Y′) = X
+T11 | consensus | X·Y + X′·Z + Y·Z = X·Y + X′·Z | T11′: (X + Y)·(X′ + Z)·(Y + Z) = (X + Y)·(X′ + Z)
+T13 | De Morgan | (X₁·X₂·…·Xₙ)′ = X₁′ + X₂′ + … + Xₙ′ | T13′: (X₁ + X₂ + … + Xₙ)′ = X₁′·X₂′·…·Xₙ′</grid>
+<p>Most of these match ordinary algebra. The ones that do not are where the mistakes happen: T2 (X + 1 = 1, not X + 1), T3 (X + X = X, not 2X), and especially T8′, the "second distributive law", which says OR distributes over AND. In ordinary algebra, x + yz ≠ (x + y)(x + z).</p>
+<p>One more identity is derived often enough to deserve a name. The <b>simplification theorem</b> X + X′·Y = X + Y follows from T8′ and T5: X + X′Y = (X + X′)(X + Y) = 1·(X + Y) = X + Y. Its dual is X·(X′ + Y) = X·Y.</p>
+<key>
+<p><b>Duality.</b> Swapping AND with OR and 0 with 1 everywhere in a true identity (leaving variables and complements alone) produces another true identity. That is why every theorem comes in a pair, and why a proof of one member of a pair proves the other. The dual of an <i>expression</i> is a different function in general: the dual of X + Y·Z is X·(Y + Z).</p>
+</key>
+
+<h3>Proving a theorem</h3>
+<p>Two methods suffice. <b>Perfect induction</b> evaluates both sides for every combination of variable values; since a variable can only be 0 or 1, checking all 2ⁿ cases is a complete proof. <b>Algebraic proof</b> transforms one side into the other using axioms and previously proven theorems, citing one at each step.</p>
+<ex title="Perfect induction for T8′">
+<truth h="X Y Z | X+Y X+Z (X+Y)(X+Z) Y·Z X+Y·Z">0 0 0 | 0 0 0 0 0; 0 0 1 | 0 1 0 0 0; 0 1 0 | 1 0 0 0 0; 0 1 1 | 1 1 1 1 1; 1 0 0 | 1 1 1 0 1; 1 0 1 | 1 1 1 0 1; 1 1 0 | 1 1 1 0 1; 1 1 1 | 1 1 1 1 1</truth>
+<p>The columns for (X + Y)(X + Z) and X + Y·Z agree in all eight rows, so the identity holds.</p>
+</ex>
+<ex title="Algebraic proofs of covering and consensus">
+<p><b>T9:</b> X + X·Y = X·1 + X·Y (T1′) = X·(1 + Y) (T8) = X·1 (T2) = X (T1′).</p>
+<p><b>T11:</b> start from the left side and multiply the redundant term by 1 written as X + X′:</p>
+<p>X·Y + X′·Z + Y·Z = X·Y + X′·Z + Y·Z·(X + X′) (T5, T1′) = X·Y + X′·Z + X·Y·Z + X′·Y·Z (T8) = X·Y·(1 + Z) + X′·Z·(1 + Y) (T8) = X·Y + X′·Z (T2, T1′).</p>
+<p>The term Y·Z is the <b>consensus</b> of X·Y and X′·Z: it is formed by taking the two terms that contain a variable in opposite forms (X and X′) and ANDing what remains. It is redundant because whenever Y·Z = 1, either X = 1 (so X·Y = 1) or X = 0 (so X′·Z = 1). Redundant consensus terms matter for glitches (<ref to="kmaps"/>).</p>
+</ex>
+
+<h3>De Morgan's laws and bubble pushing</h3>
+<p>T13 says the complement of an AND is the OR of the complements, and vice versa. In words: <b>break the bar and change the operator</b>. (A·B·C)′ = A′ + B′ + C′, and (A + B)′ = A′·B′.</p>
+<diagram name="demorgan_gates">Each gate can be drawn two ways. These equivalent symbols let you redraw a circuit so that bubbles cancel in pairs, which is how AND-OR logic is converted to NAND-NAND logic (<ref to="canonical"/>).</diagram>
+<p>De Morgan generalizes to any expression built from AND, OR and NOT. The <b>generalized De Morgan theorem</b> (T14) says: to complement an expression, complement every variable and swap every AND with OR. Parentheses must be added to keep the original grouping.</p>
+<ex title="Complementing an expression">
+<p>F = A·B + C′·(D + E). Swap operators and complement variables, keeping the grouping: F′ = (A′ + B′)·(C + D′·E′).</p>
+<p>A common error is to drop the parentheses: A′ + B′·C + D′·E′ is a different function. When in doubt, first fully parenthesize F as (A·B) + (C′·(D + E)), then apply the rule.</p>
+</ex>
+<p>A convenient consequence: a 5-input AND can be written as a 5-input NOR of the complemented inputs, A·B·C·D·E = (A′ + B′ + C′ + D′ + E′)′, and a 5-input NOR equals a 5-input AND of complemented inputs. Datasheet symbols use exactly these equivalent forms to show which signals are active low.</p>
+
+<h3>Simplifying with algebra</h3>
+<p>Algebraic simplification reduces the number of literals and gates. It has no guaranteed procedure (that is what Karnaugh maps and minimization algorithms provide), but four moves do most of the work: combining (T10), covering (T9), simplification (X + X′Y = X + Y) and consensus (T11). Citing the theorem at each step keeps the work checkable.</p>
+<ex title="Three simplifications">
+<p><b>1.</b> F = A′B′C + A′BC + AB′C.<br>
+= A′C(B′ + B) + AB′C (T8) = A′C + AB′C (T5, T1′) = C(A′ + AB′) (T8) = C(A′ + B′) (simplification) = <b>A′C + B′C</b>.</p>
+<p><b>2.</b> F = (A + B)(A + B′)(A′ + C).<br>
+(A + B)(A + B′) = A (T10′), so F = A(A′ + C) = AA′ + AC (T8) = 0 + AC (T5′) = <b>AC</b> (T1).</p>
+<p><b>3.</b> F = XY + X′Z + YZ + XYZ′.<br>
+XYZ′ is covered by XY (T9 with XY as the covering term), and YZ is the consensus of XY and X′Z (T11). So F = <b>XY + X′Z</b>.</p>
+</ex>
+<prac>
+<p>Synthesis tools simplify logic automatically, so in practice you rarely minimize by hand. The algebra still matters for three reasons: you need it to check that two expressions are equivalent when reviewing a design, interview questions ask for it, and the same identities appear in software bit manipulation, where <code>(x &amp; y) | (x &amp; ~y)</code> is just x.</p>
+</prac>
+
+<h3>Functionally complete sets of gates</h3>
+<p>A set of operations is <b>functionally complete</b> (universal) if every Boolean function can be built from it. {AND, OR, NOT} is complete because every truth table can be written as an OR of AND terms (<ref to="canonical"/>). From there:</p>
+<ul>
+<li>{AND, NOT} is complete, since X + Y = (X′·Y′)′ by De Morgan; likewise {OR, NOT}.</li>
+<li>{NAND} alone is complete: NOT X = (X·X)′, AND is a NAND followed by a NAND used as an inverter, and OR is a NAND of inverted inputs.</li>
+<li>{NOR} alone is complete, by the dual argument.</li>
+<li>A 2-to-1 multiplexer with access to the constants 0 and 1 is complete (<ref to="blocks"/>).</li>
+<li>{AND, OR} without NOT is <b>not</b> complete: every function built from it is monotone (changing an input from 0 to 1 can never change the output from 1 to 0), so it cannot make NOT. {XOR} alone is not complete either; it can only make parity functions.</li>
+</ul>
+<diagram name="nand_universal">NOT, AND and OR from NAND gates. One NAND makes an inverter, two make an AND, and three make an OR.</diagram>
+<diagram name="xor_nand">The classic four-NAND XOR. N1 is shared by both middle gates, which is what saves a gate compared with building A·B′ + A′·B directly.</diagram>
+<p>NOR-only and NAND-only implementations matter historically (the Apollo Guidance Computer was built entirely from 3-input NOR gates, a single part type that simplified manufacturing and qualification) and in modern CMOS, where NAND and NOR are the natural single-stage gates.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>n inputs give 2ⁿ truth-table rows and 2<sup>2ⁿ</sup> possible functions.</li>
+<li>XOR is parity and a controlled inverter; XNOR is equality.</li>
+<li>Theorems T1–T11 and De Morgan (T13) come in dual pairs; watch T2, T3 and T8′, which differ from ordinary algebra.</li>
+<li>Complement an expression by complementing every variable and swapping AND with OR, keeping the grouping.</li>
+<li>NAND alone, NOR alone, and the 2:1 mux are each universal; AND and OR without NOT are not.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Evaluate F = A·B′ + C′·(A + B) for A = 1, B = 1, C = 0.</p></ask>
+<sol><p>A·B′ = 1·0 = 0. C′ = 1 and A + B = 1, so C′·(A + B) = 1. F = 0 + 1 = <b>1</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Which gate outputs 1 when an odd number of its inputs are 1? Which two-input gate is a 1-bit equality detector?</p></ask>
+<sol><p><b>XOR</b> (for any number of inputs) gives 1 for an odd count. <b>XNOR</b> gives 1 when its two inputs are equal.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>State the dual of T9 (X + X·Y = X) and the dual of the expression A + B·0.</p></ask>
+<sol><p>T9′: <b>X·(X + Y) = X</b>. The dual of A + B·0 is <b>A·(B + 1)</b> (swap + and ·, swap 0 and 1). Both expressions simplify to A, consistent with duality.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Prove T10, X·Y + X·Y′ = X, algebraically, citing a theorem at each step.</p></ask>
+<sol><p>X·Y + X·Y′ = X·(Y + Y′) (T8) = X·1 (T5) = X (T1′).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Use perfect induction to prove the simplification theorem X + X′·Y = X + Y.</p></ask>
+<sol><truth h="X Y | X′Y X+X′Y X+Y">0 0 | 0 0 0; 0 1 | 1 1 1; 1 0 | 0 1 1; 1 1 | 0 1 1</truth><p>The last two columns agree in every row.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Apply De Morgan to (A·B′·C)′ and to (A′ + B + C′)′.</p></ask>
+<sol><p>(A·B′·C)′ = <b>A′ + B + C′</b>. (A′ + B + C′)′ = <b>A·B′·C</b>. These two results are complements of each other's inputs, as expected.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Find the complement of F = A·(B + C′) + D′·E using the generalized De Morgan theorem.</p></ask>
+<sol><p>Parenthesize: F = (A·(B + C′)) + (D′·E). Complement variables and swap operators: F′ = <b>(A′ + B′·C)·(D + E′)</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Simplify A·B + A·B′·C, citing the theorems you use.</p></ask>
+<sol><p>A·B + A·B′·C = A·(B + B′·C) (T8) = A·(B + C) (simplification) = <b>A·B + A·C</b> (T8).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Show how to make an inverter from a 2-input XOR gate and from a 2-input NOR gate.</p></ask>
+<sol><p>XOR: tie one input to 1, since A ⊕ 1 = A′. NOR: tie both inputs together, since (A + A)′ = A′ (T3), or tie one input to 0, since (A + 0)′ = A′.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Simplify F = (A + B)(A + B′)(A′ + C) to a minimal product of sums, citing each theorem.</p></ask>
+<sol><p>(A + B)(A + B′) = A (T10′). F = A·(A′ + C) = A·A′ + A·C (T8) = 0 + A·C (T5′) = <b>A·C</b> (T1). As a product of sums it is the two single-literal sums (A)(C).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Simplify F = X′Y′Z + X′YZ + XY′Z + XYZ′ algebraically.</p></ask>
+<sol><p>X′Y′Z + X′YZ = X′Z (T10). X′Z + XY′Z = Z(X′ + XY′) = Z(X′ + Y′) (simplification) = X′Z + Y′Z. So F = <b>X′Z + Y′Z + XYZ′</b>. No further reduction is possible: XYZ′ has no adjacent 1 (XYZ is not in F), so it stays a full product term.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write a 5-input AND of A, B, C, D, E using a single 5-input NOR gate and inverters, and write a 5-input NOR using a 5-input AND. What does this mean for a datasheet that draws an AND gate with bubbles on all inputs?</p></ask>
+<sol><p>A·B·C·D·E = <b>(A′ + B′ + C′ + D′ + E′)′</b>: a NOR fed by inverted inputs. (A + B + C + D + E)′ = <b>A′·B′·C′·D′·E′</b>: an AND fed by inverted inputs. An AND symbol with bubbled inputs is therefore a NOR gate, drawn that way to say "the output is 1 when all of these active-low inputs are asserted (0)".</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Prove T11′ (the dual consensus theorem) by applying duality to the algebraic proof of T11 given in the text.</p></ask>
+<sol><p>Dualize every step: (X + Y)(X′ + Z)(Y + Z) = (X + Y)(X′ + Z)(Y + Z + X·X′) (T5′, T1) = (X + Y)(X′ + Z)(X + Y + Z)(X′ + Y + Z) (T8′) = [(X + Y)(X + Y + Z)]·[(X′ + Z)(X′ + Z + Y)] (T6′, T7′) = (X + Y)(X′ + Z) (T9′ applied to each bracket). Each step is the dual of the corresponding step for T11, so it is valid by duality.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>How many NAND gates does each of these need when built from 2-input NANDs only: NOT, AND, OR, XOR? Draw or describe the XOR circuit.</p></ask>
+<sol><p>NOT: <b>1</b>. AND: <b>2</b> (NAND, then a NAND inverter). OR: <b>3</b> (invert each input, then NAND). XOR: <b>4</b>: N1 = (AB)′, N2 = (A·N1)′, N3 = (B·N1)′, Y = (N2·N3)′. Check A = 1, B = 0: N1 = 1, N2 = 0, N3 = 1, Y = 1.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Prove that {AND, OR} cannot implement NOT, by showing that every function built from AND and OR gates is monotone.</p></ask>
+<hint><p>Use induction on the number of gates. What does a single AND or OR gate do when one of its inputs rises from 0 to 1?</p></hint>
+<sol><p>Call f monotone if raising any input from 0 to 1 never lowers the output from 1 to 0. A single input variable is monotone. AND and OR are monotone in each input (raising an input of AND or OR can only raise the output). A gate whose inputs are monotone functions computes a monotone function, since raising a primary input raises (or keeps) each gate input, which raises (or keeps) the output. By induction over the circuit, every AND/OR circuit computes a monotone function. NOT is not monotone (raising its input from 0 to 1 lowers the output), so no AND/OR circuit computes it. Constants do not help, since constant functions are monotone too.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A 3-input majority function M(A, B, C) is 1 when at least two inputs are 1. Write it in minimal SOP form, show algebraically that M(A, B, C) = A·B + C·(A ⊕ B), and say why the second form is useful.</p></ask>
+<sol><p>Minimal SOP: <b>M = A·B + A·C + B·C</b>. Expanding the alternative: C·(A ⊕ B) = A·B′·C + A′·B·C, so A·B + C(A ⊕ B) = A·B + A·B′·C + A′·B·C. Now A·B + A·B′·C = A·(B + B′·C) = A·(B + C) = A·B + A·C (simplification), and similarly A·B + A′·B·C = A·B + B·C. Combining gives A·B + A·C + B·C. The second form is useful because it is exactly the <b>carry-out of a full adder</b> built from a sum XOR it already needs: A ⊕ B is computed once for the sum and reused for the carry (<ref to="arith"/>).</p></sol>
+</prob>
+</practice>
+</module>

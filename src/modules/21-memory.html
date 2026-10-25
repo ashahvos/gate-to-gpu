@@ -1,0 +1,151 @@
+<module id="memory" num="21" part="5" title="Memories, programmable logic and FPGAs" short="Memories and FPGAs" pre="latches,caches" blurb="How memories are built and used: ROM, flash, SRAM and DRAM cells, array organization and control signals, building larger memories, DRAM timing and bandwidth, memory as logic, FPGAs from lookup tables, ASIC versus FPGA, and byte order and alignment.">
+
+<p>Memories are the largest structures on most chips and in most systems, and they come in several technologies with very different trade-offs. This module looks at how each kind stores a bit, how bits are organized into arrays that can be addressed, and how a memory can implement arbitrary logic, which is the idea behind the FPGA.</p>
+
+<h3>Kinds of memory</h3>
+<p>Memories are classified first by whether they keep their contents without power (<b>non-volatile</b>) and by how they are written.</p>
+<grid>Type | Storage mechanism | Volatile | Write | Typical use
+Mask ROM | connections fixed at manufacture | no | never | boot code in high-volume chips
+EEPROM | charge on a floating gate | no | byte by byte, slow, limited cycles | small configuration data
+Flash (NOR, NAND) | charge on a floating gate | no | erase large blocks, then program pages; ~10³–10⁵ cycles | firmware (NOR), SSDs and SD cards (NAND)
+SRAM | cross-coupled inverters (6 transistors) | yes | fast, unlimited | caches, register files, FPGA configuration
+DRAM | charge on a capacitor (1 transistor + 1 capacitor) | yes, and must be refreshed | fast, unlimited | main memory</grid>
+<p>Flash's asymmetry, writes that can only clear bits after a slow erase of a whole block, and its limited endurance, are why SSDs contain a controller with a flash translation layer that remaps writes and spreads them evenly across blocks (wear leveling).</p>
+
+<h3>The SRAM cell</h3>
+<p>An SRAM bit is the bistable pair of inverters from <ref to="latches"/>, plus two access transistors that connect its two nodes to a pair of <b>bit lines</b> when the <b>word line</b> is high.</p>
+<diagram name="sram6t">The 6T SRAM cell. Sizing matters: the access transistors must be weak enough that a read does not flip the cell, yet strong enough to overpower it during a write.</diagram>
+<p>SRAM is fast (a cache array can be read in under a nanosecond) and needs no refresh, but six transistors per bit make it about an order of magnitude less dense than DRAM. On-chip caches, register files and FPGA configuration memory are SRAM.</p>
+
+<h3>The DRAM cell</h3>
+<p>A DRAM bit is a tiny capacitor (a few femtofarads) behind a single access transistor. This is about as small as a memory cell can be, which is why gigabytes of DRAM fit on a module.</p>
+<diagram name="dram1t">The 1T1C DRAM cell. The capacitor is built as a deep trench or a tall stack to get enough capacitance in a small area.</diagram>
+<p>The price is complexity. Reading shares the cell's charge with a bit line whose capacitance is far larger, so the signal is a few tens of millivolts and the read destroys the stored value; sense amplifiers amplify the difference and write the value back. Charge leaks away in milliseconds, so every row is periodically <b>refreshed</b> (read and rewritten), typically within every 64 ms.</p>
+<p>DRAM is organized in <b>banks</b> of rows and columns. An access first <b>activates</b> a row, copying the whole row (several kilobytes) into the bank's sense amplifiers, the <b>row buffer</b>; then reads or writes columns from it; then <b>precharges</b> the bank before a different row can be opened. Accesses to an already open row are fast; accesses to a different row pay the precharge and activate delays. These are the familiar timings tRP (precharge), tRCD (activate to column access) and CL (column access latency). Memory controllers reorder requests to maximize row-buffer hits.</p>
+<p>Bandwidth comes from wide, fast interfaces. DDR (double data rate) memory transfers data on both edges of its clock: a DDR4-3200 channel performs 3200 million transfers per second on a 64-bit (8-byte) bus, 25.6 GB/s. GPUs use GDDR, which runs narrower buses much faster, or HBM (high-bandwidth memory), which stacks DRAM dies on the processor package and uses a 1024-bit interface per stack to reach hundreds of gigabytes per second per stack at lower energy per bit.</p>
+
+<h3>Organizing an array</h3>
+<p>A memory with 2ⁿ words of m bits each is described as 2ⁿ × m and needs n address bits. Internally the cells form a two-dimensional array that is roughly square, because a long thin array has long, slow word lines or bit lines and a huge decoder. The upper address bits select a row through the <b>row decoder</b> (<ref to="blocks"/>); all cells of that row drive their bit lines; <b>sense amplifiers</b> detect the small bit-line signals; and a <b>column multiplexer</b> driven by the lower address bits selects the requested word from the row.</p>
+<diagram name="memarray">A memory array. Splitting the address into row and column parts keeps both the decoder and the multiplexer manageable.</diagram>
+<p>A discrete memory chip exposes the array through a few control signals, usually active-low:</p>
+<ul>
+<li><b>CS′</b> (chip select) enables the chip; when it is high the chip ignores everything and its data pins float (high impedance).</li>
+<li><b>WE′</b> (write enable) low means write: the chip stores the value on the data pins at the given address.</li>
+<li><b>OE′</b> (output enable) low during a read lets the chip drive the data pins with the addressed word.</li>
+</ul>
+<p>A write therefore consists of placing the address and data on the buses, asserting CS′ and pulsing WE′ low while respecting the datasheet's setup and hold times; a read asserts CS′ and OE′ and samples the data after the access time.</p>
+
+<h3>Building larger memories</h3>
+<p>Memory chips combine in two directions:</p>
+<ul>
+<li><b>Width expansion:</b> chips side by side share the address and control lines, and each supplies part of the data word. Two 1K × 8 chips make a 1K × 16 memory.</li>
+<li><b>Depth expansion:</b> chips share address and data lines, and a decoder on the extra upper address bits drives their chip selects, so exactly one chip responds to each address.</li>
+</ul>
+<diagram name="mem_expand">Depth expansion with a decoder on the upper address bits. Because only the selected chip drives the data bus, the chips' tristate outputs can share it.</diagram>
+<p>To build an A × B memory from a × b chips, use (A/a) × (B/b) chips: A/a rows of chips selected by a log₂(A/a)-to-(A/a) decoder, each row containing B/b chips side by side.</p>
+
+<h3>Memory as logic</h3>
+<p>A memory with n address bits and m data bits can implement <b>any</b> function of n inputs and m outputs: connect the inputs to the address lines and store the function's truth table as the contents. Each output column of the truth table becomes a column of stored bits. From outside, nothing distinguishes it from a gate-level implementation.</p>
+<diagram name="lut_mem">A full adder as an 8 × 2 memory. Row k holds the two output bits for the input combination with binary value k.</diagram>
+<p>For example, a 3-bit squarer needs an 8 × 6 memory (the largest result, 49, needs 6 bits), and row 5 holds 011001 = 25. A 4-bit by 4-bit multiplier needs 8 address bits and 8 output bits, a 256 × 8 memory, in which row 0010 0111 (39) holds 2 × 7 = 0000 1110. The catch is scaling: the memory doubles with every additional input, so a 32-bit adder (64 inputs) is impossible this way. Small memories used this way are called <b>lookup tables</b> (LUTs), and they are the logic elements of FPGAs.</p>
+
+<h3>FPGAs</h3>
+<p>A field-programmable gate array is a chip whose logic and wiring are defined by configuration data loaded after manufacture. Its basic logic cell contains:</p>
+<ul>
+<li>a small LUT, typically 4 to 6 inputs, that implements any function of its inputs;</li>
+<li>a flip-flop that can register the LUT's output;</li>
+<li>a multiplexer, set by configuration, that chooses the combinational or registered output.</li>
+</ul>
+<diagram name="clb">A simplified logic cell. Real cells pair two or more LUTs and flip-flops and add fast carry chains for arithmetic.</diagram>
+<p>Cells are arranged in a grid embedded in <b>routing channels</b>. Programmable <b>switch boxes</b>, multiplexers controlled by configuration bits, connect wire segments to each other and to cell inputs and outputs.</p>
+<diagram name="fpga_fabric">The FPGA fabric. A design is mapped by synthesis into LUTs and flip-flops, placed onto specific cells, and routed by choosing switch settings.</diagram>
+<p>Mapping logic onto an FPGA means covering the design with functions of at most k inputs. The water-pump controller of <ref to="fsm"/> (inputs L and H, one state bit Q, D = Q′·L′ + Q·H′) fits in a single 3-input LUT plus the cell's flip-flop. Adding a third input such as a KILL switch still fits in a 4-input LUT, but a function with more inputs than one LUT has must be split across cells, adding a routing delay. Routing in fact dominates FPGA delay and area: a large fraction of an FPGA's silicon is switches and wires.</p>
+<p>Because most FPGAs store their configuration in SRAM, they load it from external flash every time they power up. Modern devices also contain hard blocks that would be inefficient to build from LUTs: block RAMs, DSP slices (multiply-accumulate units), clock managers, high-speed serial transceivers, PCIe controllers and even processor cores.</p>
+
+<h3>ASIC versus FPGA versus software</h3>
+<p>The same function can be run as software on a processor, configured into an FPGA, or built as a custom chip (an ASIC). The trade-offs:</p>
+<grid>Property | Software on a CPU | FPGA | ASIC
+Up-front cost | lowest | low (buy chips, write HDL) | highest: masks and engineering cost millions of dollars (NRE)
+Per-unit cost | low (commodity CPU) | high | lowest at high volume
+Performance and energy | baseline | often 10–100× better than software for parallel, regular work | typically 3–10× faster and lower power than the same design on an FPGA
+Flexibility | change anytime | reconfigure in the field | fixed after manufacture
+Time to market | fastest | fast | slowest (months of verification and fabrication)</grid>
+<p>FPGAs are used for low- and medium-volume products, for hardware that must change after deployment (networking, telecom, test equipment), and to prototype ASICs before tape-out (<ref to="chipflow"/>). ASICs win when volume is high enough to amortize the up-front cost or when the last factor in performance and power matters, as in phones, GPUs and AI accelerators.</p>
+
+<h3>Byte order and alignment</h3>
+<p>Almost all memories are <b>byte-addressable</b>: each address names one byte, and a 32-bit value occupies four consecutive addresses. The order of those bytes is the machine's <b>endianness</b>. A <b>little-endian</b> machine (x86, most ARM and RISC-V systems) stores the least significant byte at the lowest address; a <b>big-endian</b> machine stores the most significant byte first, which is also the standard "network byte order" of internet protocols. The value 0x12345678 at address 0x100 is stored as 78 56 34 12 on a little-endian machine and 12 34 56 78 on a big-endian one.</p>
+<pre lang="c">uint32_t x = 0x12345678;
+uint8_t *p = (uint8_t *)&x;      // look at x one byte at a time
+bool little_endian = (p[0] == 0x78);</pre>
+<p>Processors also prefer, and some require, that an n-byte value be stored at an address that is a multiple of n (<b>alignment</b>), so that it never straddles two cache lines or memory words. C compilers therefore insert padding in structures: on a typical 64-bit platform, <code>struct { char a; int b; char c; }</code> occupies 12 bytes (3 bytes of padding after <code>a</code>, 3 after <code>c</code>), while reordering the fields to <code>{ int b; char a; char c; }</code> needs only 8. Endianness and padding matter whenever bytes cross a boundary: binary file formats, network packets, memory-mapped device registers, and data shared between a CPU and a GPU or FPGA.</p>
+
+<h3>Summary</h3>
+<ul>
+<li>Non-volatile: ROM, EEPROM, flash (block erase, limited endurance). Volatile: SRAM (6T, fast, caches) and DRAM (1T1C, dense, refreshed, destructive reads).</li>
+<li>DRAM: banks, rows, row buffer; activate, column access, precharge. DDR transfers on both clock edges; HBM goes wide.</li>
+<li>Arrays: row decoder, word lines, bit lines, sense amplifiers, column mux. Chips: CS′, WE′, OE′.</li>
+<li>Width expansion shares addresses; depth expansion decodes upper address bits into chip selects.</li>
+<li>A 2ⁿ × m memory implements any n-input, m-output function; FPGAs are built from small LUTs, flip-flops and programmable routing.</li>
+<li>Software, FPGA and ASIC trade flexibility and up-front cost against performance, power and unit cost.</li>
+<li>Little-endian stores the low byte first; alignment rules add padding to C structures.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>How many address lines does a 64K × 8 memory need, and how many bits does it store?</p></ask>
+<sol><p>64K = 2¹⁶ words: <b>16 address lines</b>. 2¹⁶ × 8 = <b>524,288 bits</b> (512 Kbit, 64 KB).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Why are caches built from SRAM and main memory from DRAM?</p></ask>
+<sol><p>SRAM is fast and needs no refresh but uses six transistors per bit; DRAM uses one transistor and a capacitor per bit, so it is roughly ten times denser and cheaper per bit, but slower, refreshed and destructively read. Small, fast levels use SRAM; the large, capacity-driven level uses DRAM.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>How many 1K × 8 chips are needed to build a 4K × 16 memory? How are they arranged and how many decoder outputs are needed?</p></ask>
+<sol><p>(4K/1K) × (16/8) = <b>8 chips</b>: four rows (depth) of two chips side by side (width). A 2-to-4 decoder on A11–A10 drives the four chip-select rows; within a row both chips share the select and supply the low and high bytes.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What memory size implements a function with 4 inputs and 3 outputs? With 10 inputs and 8 outputs?</p></ask>
+<sol><p>2⁴ × 3 = <b>16 × 3</b> (48 bits). 2¹⁰ × 8 = <b>1K × 8</b> (8 Kbit).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>The 32-bit value 0x12345678 is stored at address 0x100. List the bytes at addresses 0x100 to 0x103 on a little-endian and on a big-endian machine.</p></ask>
+<sol><p>Little-endian: <b>78 56 34 12</b>. Big-endian: <b>12 34 56 78</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>What is the peak bandwidth of one DDR4-3200 channel with a 64-bit bus? Of a dual-channel system?</p></ask>
+<sol><p>3200 × 10⁶ transfers/s × 8 bytes = <b>25.6 GB/s</b> per channel; dual channel <b>51.2 GB/s</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Give the contents of an 8 × 6 memory implementing a 3-bit squarer, and the row and contents that compute 2 × 7 in a 256 × 8 memory implementing a 4-bit × 4-bit multiplier (multiplicand in the upper address bits).</p></ask>
+<sol><p>Squarer rows 0–7: 000000, 000001, 000100, 001001, 010000, <b>011001</b>, 100100, 110001 (0, 1, 4, 9, 16, 25, 36, 49). Multiplier: address 0010 0111 = row <b>39</b>, contents <b>0000 1110</b> = 14.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Give sizeof for each structure on a typical 64-bit platform (int 4 bytes, double 8, natural alignment): (a) <code>struct { char a; int b; char c; }</code> (b) <code>struct { int b; char a; char c; }</code> (c) <code>struct { char a; double d; int i; }</code>.</p></ask>
+<sol><p>(a) a at 0, pad to 4, b at 4–7, c at 8, pad to a multiple of 4: <b>12</b>. (b) b 0–3, a 4, c 5, pad to 8: <b>8</b>. (c) a at 0, pad to 8, d at 8–15, i at 16–19, pad to a multiple of 8: <b>24</b>. Ordering fields from largest to smallest minimizes padding.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A DRAM has 8192 rows per bank that must each be refreshed every 64 ms, and each refresh operation occupies the bank for 350 ns. How often must a refresh be issued, and what fraction of time does refresh consume?</p></ask>
+<sol><p>64 ms/8192 = <b>7.8 μs</b> between refreshes. 350 ns/7.8 μs ≈ <b>4.5%</b> of the time the bank is unavailable. Refresh overhead grows with density, which is why newer DRAM generations refresh per bank and in finer steps.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A DRAM is clocked at 1600 MHz (0.625 ns per cycle) with CL = tRCD = tRP = 16 cycles. What is the latency to the first data for (a) a row-buffer hit, (b) an access to a bank with no open row, (c) an access to a bank with a different row open?</p></ask>
+<sol><p>(a) CL: 16 × 0.625 = <b>10 ns</b>. (b) tRCD + CL: <b>20 ns</b>. (c) tRP + tRCD + CL: <b>30 ns</b>. The controller's scheduling of row hits versus conflicts can change effective latency by a factor of three.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An FPGA has 6-input LUTs. How many LUTs does an 8-input AND need? A 6-input XOR? An arbitrary 7-input function?</p></ask>
+<sol><p>8-input AND: one LUT computes the AND of six inputs, a second ANDs that result with the other two: <b>2 LUTs</b> (2 levels). 6-input XOR: <b>1 LUT</b>, since any 6-input function fits. Arbitrary 7-input function: two LUTs compute it for the 7th input = 0 and = 1 (Shannon expansion), and a 2-to-1 mux selects: <b>2 LUTs + a mux</b>, which FPGA cells provide as a dedicated wide-function multiplexer.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a 64 × 8 memory from 16 × 4 chips: how many chips, what does each address bit connect to, and what selects each chip?</p></ask>
+<sol><p>(64/16) × (8/4) = <b>8 chips</b> in four rows of two. A3–A0 go to every chip's address pins. A5–A4 drive a 2-to-4 decoder whose outputs are the chip selects of the four rows. In each row, one chip supplies D7–D4 and the other D3–D0; all rows share the 8-bit data bus through tristate outputs.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Map the water-pump controller (D = Q′·L′ + Q·H′, output pump = Q) into one FPGA logic cell with a 3-input LUT. Give the 8 LUT contents in the order of the address Q L H = 000 to 111, and say which output the cell's mux selects.</p></ask>
+<sol><p>D as a function of Q L H: 000 → 1, 001 → 1, 010 → 0, 011 → 0, 100 → 1, 101 → 0, 110 → 1, 111 → 0. LUT contents: <b>1 1 0 0 1 0 1 0</b>. The LUT output drives the flip-flop's D; the flip-flop's Q is both the pump output and the feedback into the LUT's Q input, so the mux selects the <b>registered</b> output.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A company needs 2,000 units of a video-processing board. An FPGA costs $400 per unit; an ASIC would cost $150 per unit after $3 million of design and mask (NRE) costs and take 12 extra months. Compare the costs and name two non-cost factors in the decision.</p></ask>
+<sol><p>FPGA: 2000 × 400 = <b>$0.8 M</b>. ASIC: 3 M + 2000 × 150 = <b>$3.3 M</b>. The FPGA wins until volume exceeds 3 M/(400 − 150) = 12,000 units. Non-cost factors: time to market (12 months), the ability to fix bugs or update algorithms in the field (FPGA), and power, performance or size requirements that an FPGA might not meet (ASIC).</p></sol>
+</prob>
+</practice>
+</module>

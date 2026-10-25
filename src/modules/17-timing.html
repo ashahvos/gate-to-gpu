@@ -1,0 +1,135 @@
+<module id="timing" num="17" part="4" title="Timing: setup, hold, clocks and metastability" short="Timing" pre="latches,registers" blurb="The rules every synchronous design must satisfy: setup and hold constraints, critical paths and maximum frequency, clock skew and jitter, how violations are fixed, and how signals cross safely between clock domains despite metastability.">
+
+<p>Synchronous design makes a promise: if every flip-flop shares one clock, and every path between flip-flops settles within a clock period without changing too soon after an edge, then the circuit behaves exactly as its logic equations say, regardless of the detailed delays. This module states that promise precisely. The two inequalities it produces, the setup and hold constraints, are checked on every path of every chip by <b>static timing analysis</b> (STA) tools, and are among the most frequently asked topics in hardware interviews.</p>
+
+<h3>Delays of a path</h3>
+<p>A combinational block has two delays of interest. Its <b>propagation delay</b> t<sub>pd</sub> is the longest time from any input change until all outputs are stable at their new values. Its <b>contamination delay</b> t<sub>cd</sub> is the shortest time from an input change until any output starts to change. Both come from the gates along the slowest and fastest paths through the block. Flip-flops likewise have a maximum and a minimum clock-to-Q delay.</p>
+<diagram name="reg2reg">A path from a launching flip-flop through combinational logic to a capturing flip-flop. Every pair of connected flip-flops in a design forms such a path.</diagram>
+
+<h3>The setup constraint: how fast can the clock run?</h3>
+<p>At a clock edge, FF1 launches a new value: it appears at Q after t<sub>clk→Q</sub>, then propagates through the logic, arriving at FF2's D input after at most t<sub>clk→Q</sub> + t<sub>pd</sub>. FF2 needs it to be stable t<sub>setup</sub> before the <i>next</i> edge, one period T later:</p>
+<eq c>T ≥ t<sub>clk→Q</sub> + t<sub>pd</sub> + t<sub>setup</sub></eq>
+<p>The <b>setup slack</b> is the difference between the two sides; negative slack is a violation. The path with the least slack is the <b>critical path</b>, and it sets the maximum frequency f<sub>max</sub> = 1/T<sub>min</sub>. A violation means FF2 may capture the old value, or a mixture, or go metastable, so the circuit fails at that frequency. But it can always be fixed by slowing the clock, which is why parts are "speed binned" and why overclocking eventually fails.</p>
+<ex title="Finding the maximum frequency">
+<p>A design's flip-flops have t<sub>clk→Q</sub> = 60 ps and t<sub>setup</sub> = 40 ps. Three register-to-register paths have logic delays of 520, 610 and 380 ps. The critical path is the 610 ps one: T<sub>min</sub> = 60 + 610 + 40 = 710 ps, so f<sub>max</sub> ≈ 1.41 GHz. At a 750 ps clock (1.33 GHz) its slack is 750 − 710 = 40 ps, and the other two paths have 130 ps and 270 ps.</p>
+</ex>
+
+<h3>The hold constraint: does the circuit work at all?</h3>
+<p>The second constraint concerns the same edge, not the next one. At an edge, FF2 is capturing the value launched one cycle earlier, and it needs that value to stay stable for t<sub>hold</sub> after the edge. But the same edge also causes FF1 to launch a new value, which can arrive as soon as t<sub>clk→Q,min</sub> + t<sub>cd</sub> later. If the new value arrives too soon, it corrupts the capture:</p>
+<eq c>t<sub>clk→Q,min</sub> + t<sub>cd</sub> ≥ t<sub>hold</sub></eq>
+<key><p>The clock period does not appear in the hold constraint. A hold violation cannot be fixed by slowing the clock: the chip fails at every frequency. Hold must be fixed in the design, typically by inserting delay buffers on the too-short path.</p></key>
+<p>The paths at risk are short ones: a shift register (one flip-flop's output wired directly to the next one's input, t<sub>cd</sub> ≈ 0) relies entirely on t<sub>clk→Q,min</sub> exceeding t<sub>hold</sub>, which flip-flop designers guarantee for flip-flops in the same library, as long as the clock arrives at both at the same time. That proviso leads to skew.</p>
+
+<h3>Clock skew and jitter</h3>
+<p>The clock is distributed across a chip by a large network of buffers and wires (an H-tree, a mesh, or a tuned tree), and it does not arrive everywhere at the same instant. The <b>skew</b> between two flip-flops is the difference in their clock arrival times; define δ = (capture clock arrival) − (launch clock arrival). Including skew:</p>
+<eq c>setup:   T + δ ≥ t<sub>clk→Q</sub> + t<sub>pd</sub> + t<sub>setup</sub>
+hold:    t<sub>clk→Q,min</sub> + t<sub>cd</sub> ≥ t<sub>hold</sub> + δ</eq>
+<p>A late capture clock (positive δ) gives the data more time, helping setup, but extends the window during which the old value must be held, hurting hold by exactly the same amount. Skew can therefore be used deliberately ("useful skew") to borrow time for a critical path, but uncontrolled skew is dangerous mainly because of hold, which no clock-frequency change can repair.</p>
+<p><b>Jitter</b> is variation in the clock period itself from cycle to cycle, caused by noise in the clock generator (a PLL) and the distribution network. In the setup check it reduces the usable period: if consecutive edges can be up to t<sub>jitter</sub> closer together than nominal, the constraint becomes T − t<sub>jitter</sub> ≥ t<sub>clk→Q</sub> + t<sub>pd</sub> + t<sub>setup</sub>. Real STA adds further margins for on-chip variation in voltage, temperature and manufacturing.</p>
+<tool name="timing"/>
+
+<h3>Fixing timing violations</h3>
+<grid>Violation | Remedies
+Setup (path too slow) | Reduce logic levels (restructure, carry-lookahead instead of ripple); use faster (larger, lower-V<sub>T</sub>) cells; shorten long wires or add repeaters; <b>pipeline</b> by adding a register in the middle of the path (<ref to="perf"/>); <b>retime</b> by moving existing registers to balance stage delays; or lower the clock frequency.
+Hold (path too fast) | Add delay buffers on the short path; reduce skew between the launch and capture clocks. Never fixable by the clock frequency.</grid>
+<p>STA also needs to be told about paths that should not be checked normally. A <b>multicycle path</b> is one the design deliberately allows two or more cycles to complete (for example, a result read only every other cycle); a <b>false path</b> is a structural path that can never actually be exercised, or one between unrelated clock domains, which are handled by the synchronization techniques below rather than by timing.</p>
+
+<h3>Metastability</h3>
+<p>Setup and hold can be guaranteed for signals launched by the same clock. They cannot be guaranteed for a signal that comes from outside (a button, a sensor, a serial line) or from a different clock domain: such a signal can change at any moment, and sooner or later it will change inside some flip-flop's setup-and-hold window.</p>
+<p>When that happens, the flip-flop's internal loop can be left near its balance point, the metastable state of the cross-coupled inverters (<ref to="latches"/>). Its output hovers at an intermediate voltage, or oscillates, and only resolves to 0 or 1 after an unbounded, random time. The resolution is exponential: the probability that the flip-flop is still unresolved t after the edge is proportional to e<sup>−t/τ</sup>, where τ, the regeneration time constant of the loop, is a few tens of picoseconds in modern processes.</p>
+<wavegen name="metastable">An asynchronous input changes just before an edge of the destination clock. FF1 becomes metastable and takes most of a cycle to resolve; FF2, sampling FF1 one cycle later, sees a settled value.</wavegen>
+<p>The failure rate of a synchronizer is expressed as a mean time between failures:</p>
+<eq c>MTBF = e<sup>t<sub>r</sub>/τ</sup> / (T<sub>0</sub> · f<sub>clk</sub> · f<sub>data</sub>)</eq>
+<p>where t<sub>r</sub> is the time allowed for resolution before the value is used, f<sub>clk</sub> is the sampling clock frequency, f<sub>data</sub> is the rate at which the asynchronous input changes, and T<sub>0</sub> is a device constant related to the width of the vulnerable window. Because t<sub>r</sub> appears in an exponent, a little more resolution time makes an enormous difference. With τ = 20 ps, T<sub>0</sub> = 50 ps, f<sub>clk</sub> = 1 GHz and f<sub>data</sub> = 10 MHz, allowing t<sub>r</sub> = 0.45 ns gives an MTBF of about 3 hours, while allowing t<sub>r</sub> = 0.9 ns gives about 2 million years.</p>
+
+<h3>Synchronizers</h3>
+<p>The standard defense is the <b>two-flip-flop synchronizer</b>: the asynchronous signal goes into one flip-flop clocked by the destination clock, whose output goes straight into a second flip-flop. The first may go metastable, but it has almost a full clock period to resolve before the second samples it, so the second flip-flop's output is clean with an extremely high MTBF. Very fast clocks or high-reliability designs use three stages.</p>
+<diagram name="sync2ff">The two-flip-flop synchronizer. The cost is latency: the destination sees the input one to two cycles after it changes.</diagram>
+<p>Rules for using synchronizers correctly:</p>
+<ul>
+<li>Put <b>no logic</b> between the two flip-flops; it would eat resolution time. The input must come directly from a flip-flop in the source domain, not from combinational logic, whose glitches could be sampled.</li>
+<li>Synchronize a signal <b>in one place</b>. Two separate synchronizers on the same input can resolve differently in the same cycle, so different parts of the design disagree about its value.</li>
+<li><b>Never synchronize a multi-bit value bit by bit.</b> If several bits change together, each synchronizer may resolve its bit to the old or new value independently, producing a value that never existed. A binary counter going from 0111 to 1000 could be read as 1111 or 0000.</li>
+</ul>
+<p>Multi-bit data crosses clock domains in one of three ways:</p>
+<ul>
+<li><b>Gray code</b> for counters and pointers: only one bit changes per increment, so the sampled value is always either the old or the new count.</li>
+<li><b>Handshaking</b>: the source holds the data stable and raises a single request signal, which is synchronized into the destination; the destination then reads the data (now known to be stable) and returns a synchronized acknowledgment.</li>
+<li>An <b>asynchronous FIFO</b>: a dual-port memory written with the source clock and read with the destination clock. The write and read pointers are kept in Gray code and each is synchronized into the other domain to compute the full and empty flags. Synchronization delay makes the flags conservative (the FIFO may look full or empty a little longer than it is), which is safe.</li>
+</ul>
+<diagram name="async_fifo">An asynchronous FIFO. With 2ⁿ entries the pointers carry one extra bit, so that "full" (pointers equal except for the wrap bit) can be distinguished from "empty" (pointers fully equal).</diagram>
+<p>A single-cycle pulse is a special problem: when it goes from a fast clock domain to a slower one, it may be shorter than a destination clock period and fall between edges entirely. A <b>pulse synchronizer</b> converts each pulse into a change of level (a toggle flip-flop in the source domain), synchronizes the level, and recovers a pulse by detecting edges of the synchronized level with an XOR against its delayed copy.</p>
+
+<h3>Synchronizing resets</h3>
+<p>An asynchronous reset is convenient because it works without a clock, but its release is an asynchronous event: if it is released near a clock edge, flip-flops may leave reset in different cycles or go metastable, and a state machine can start in an illegal state. The standard <b>reset synchronizer</b> asserts reset asynchronously and releases it synchronously.</p>
+<diagram name="reset_sync">When rst_n falls, both flip-flops clear at once and the synchronized reset asserts immediately. When rst_n rises, a 1 propagates through the two flip-flops, so rst_n_sync deasserts on a clock edge, two cycles later, with the metastability protection of a two-flip-flop synchronizer.</diagram>
+
+<h3>Summary</h3>
+<ul>
+<li>Setup: T + δ ≥ t<sub>clk→Q</sub> + t<sub>pd</sub> + t<sub>setup</sub>. The worst path is the critical path; f<sub>max</sub> = 1/T<sub>min</sub>.</li>
+<li>Hold: t<sub>clk→Q,min</sub> + t<sub>cd</sub> ≥ t<sub>hold</sub> + δ. Independent of frequency; fix with delay on short paths.</li>
+<li>Positive skew (capture later) helps setup and hurts hold equally; jitter subtracts from the period.</li>
+<li>Fix setup with fewer logic levels, faster cells, pipelining or retiming; fix hold with buffers.</li>
+<li>Asynchronous inputs cause metastability; MTBF grows exponentially with resolution time.</li>
+<li>Use two-flip-flop synchronizers for single bits, Gray code, handshakes or async FIFOs for multi-bit data, toggle synchronizers for pulses, and assert-async/deassert-sync for resets.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Define setup time and hold time in one sentence each, and state which one limits the maximum clock frequency.</p></ask>
+<sol><p><b>Setup time:</b> how long before the clock edge D must be stable. <b>Hold time:</b> how long after the edge D must remain stable. The <b>setup</b> constraint limits the clock frequency; the hold constraint does not involve the period.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>t<sub>clk→Q</sub> = 50 ps, t<sub>setup</sub> = 30 ps, and the critical path's logic delay is 400 ps. What is f<sub>max</sub>? What is the slack at 2 GHz?</p></ask>
+<sol><p>T<sub>min</sub> = 50 + 400 + 30 = 480 ps → f<sub>max</sub> ≈ <b>2.08 GHz</b>. At 2 GHz (T = 500 ps) the slack is <b>+20 ps</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A path has t<sub>clk→Q,min</sub> = 40 ps, t<sub>cd</sub> = 20 ps, and the capture flip-flop's hold time is 70 ps. Is there a hold violation? Would halving the clock frequency help? What would?</p></ask>
+<sol><p>40 + 20 = 60 ps &lt; 70 ps: a <b>10 ps hold violation</b>. Halving the frequency does <b>not</b> help, since the period is not in the hold check. Add at least 10 ps of delay (buffers) on that path, or reduce skew if the capture clock is late.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Why must a two-flip-flop synchronizer have no logic between its two flip-flops?</p></ask>
+<sol><p>The time between the first flip-flop's output settling and the second flip-flop sampling it is the metastability resolution time. Logic in between consumes part of that time and reduces the MTBF exponentially; it could also let a metastable intermediate voltage propagate into several gates that interpret it differently.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A path has t<sub>clk→Q</sub> = 50 ps (max) and 40 ps (min), logic delay 400 ps (max) and 20 ps (min), setup time 30 ps and hold time 40 ps. The capture clock arrives 30 ps after the launch clock. Compute T<sub>min</sub> and the hold slack, and compare both with the zero-skew case.</p></ask>
+<sol><p>Setup: T + 30 ≥ 50 + 400 + 30 = 480 → T<sub>min</sub> = <b>450 ps</b> (2.22 GHz), versus 480 ps without skew: the late capture clock gives the path 30 ps more. Hold: 40 + 20 ≥ 40 + 30? 60 ≥ 70 is false: <b>−10 ps hold slack</b>. Without skew it would have been +20 ps; the skew moved 30 ps from hold to setup.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A path consists of a NAND (35 ps), XOR (60 ps), NOR (40 ps) and inverter (15 ps) in series; a parallel path from the same launch flip-flop goes through just one inverter (15 ps) to the same capture flip-flop. With t<sub>clk→Q</sub> = 45/35 ps (max/min), t<sub>setup</sub> = 25 ps and t<sub>hold</sub> = 30 ps, find f<sub>max</sub> and check hold.</p></ask>
+<sol><p>t<sub>pd</sub> = 35 + 60 + 40 + 15 = 150 ps; T<sub>min</sub> = 45 + 150 + 25 = 220 ps → <b>f<sub>max</sub> ≈ 4.5 GHz</b>. Hold uses the shortest path: t<sub>cd</sub> = 15 ps (taking each gate's delay as its contamination delay too); 35 + 15 = 50 ≥ 30: <b>met, with 20 ps slack</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Using MTBF = e<sup>t<sub>r</sub>/τ</sup>/(T<sub>0</sub>f<sub>clk</sub>f<sub>data</sub>) with τ = 20 ps, T<sub>0</sub> = 50 ps, f<sub>clk</sub> = 1 GHz and f<sub>data</sub> = 10 MHz, compute the MTBF for resolution times of 0.45 ns and 0.9 ns.</p></ask>
+<sol><p>Denominator: 50 × 10⁻¹² × 10⁹ × 10⁷ = 5 × 10⁵ /s. t<sub>r</sub> = 0.45 ns: e<sup>22.5</sup> ≈ 5.9 × 10⁹ → MTBF ≈ 1.2 × 10⁴ s ≈ <b>3.3 hours</b>. t<sub>r</sub> = 0.9 ns: e<sup>45</sup> ≈ 3.5 × 10¹⁹ → MTBF ≈ 7 × 10¹³ s ≈ <b>2.2 million years</b>. Doubling the resolution time squared the exponential factor.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 4-bit binary counter in clock domain A is read in domain B by synchronizing each bit with its own two-flip-flop synchronizer. The counter changes from 0111 to 1000 just as domain B samples. Which values could B see? How does Gray code fix this?</p></ask>
+<sol><p>Each of the four bits may independently be captured old or new, so B could see <b>any of the 16 values</b> formed by mixing 0111 and 1000 bit by bit (0000, 1111, 0101, and so on). In Gray code consecutive counts differ in exactly one bit (0100 → 1100 for 7 → 8), so only that bit is uncertain and B sees either 7 or 8, both of which are legitimate values.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 1 GHz clock has a cycle-to-cycle jitter of up to 30 ps. A path has t<sub>clk→Q</sub> = 50 ps, t<sub>setup</sub> = 30 ps. What is the longest logic delay it can tolerate?</p></ask>
+<sol><p>The shortest period that can occur is 1000 − 30 = 970 ps, so t<sub>pd</sub> ≤ 970 − 50 − 30 = <b>890 ps</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Explain why a reset synchronizer asserts its output asynchronously but deasserts it synchronously. What could go wrong with a fully asynchronous release?</p></ask>
+<sol><p>Asynchronous assertion lets reset take effect immediately, even without a running clock (at power-up). Releasing reset is an asynchronous event relative to the clock: if it happens near an edge, some flip-flops may see it before the edge and others after, or go metastable, so a state machine can leave reset with some bits updated and others not, landing in an illegal state. Synchronizing the release makes every flip-flop leave reset on the same, well-defined edge.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A path has two pipeline stages with combinational delays of 600 ps and 200 ps (t<sub>clk→Q</sub> = 50 ps, t<sub>setup</sub> = 30 ps). What is f<sub>max</sub>? If the register between the stages can be moved so that the logic splits 400/400 (retiming), what is the new f<sub>max</sub>?</p></ask>
+<sol><p>Before: T ≥ 50 + 600 + 30 = 680 ps → <b>1.47 GHz</b>. After retiming: T ≥ 50 + 400 + 30 = 480 ps → <b>2.08 GHz</b>. The latency in cycles is unchanged (still two stages), and the function is unchanged because only the register's position moved.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A one-cycle pulse in a 500 MHz domain must be delivered as a one-cycle pulse in a 100 MHz domain. Why does a plain two-flip-flop synchronizer fail, and what circuit works?</p></ask>
+<sol><p>A 2 ns pulse can fall entirely between two 10 ns destination edges and never be sampled. A <b>toggle (pulse) synchronizer</b> works: in the source domain each pulse toggles a flip-flop, turning the pulse into a level change that persists; a two-flip-flop synchronizer brings the level into the destination; a third flip-flop holds the previous synchronized value, and their XOR produces a one-cycle pulse per toggle. Pulses must be spaced far enough apart (a few destination cycles) for each toggle to be seen.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An asynchronous FIFO has 8 entries and uses 4-bit pointers. Explain why the pointers have 4 bits instead of 3, and how full and empty are detected (in binary terms, before Gray coding).</p></ask>
+<sol><p>With 3-bit pointers, "write pointer equals read pointer" happens both when the FIFO is empty and when the writer has lapped the reader (full). The extra bit counts wraps: <b>empty</b> when all 4 bits are equal; <b>full</b> when the low 3 bits are equal and the top bits differ (the writer is exactly one lap ahead). In Gray code the same tests become: empty when the Gray pointers are equal; full when the top two bits of the two Gray pointers are both different and all remaining bits are equal. Each flag is computed in its own domain from a synchronized (slightly stale) copy of the other pointer, which can only make the flag pessimistic, never wrong.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A designer fixes a setup violation by delaying the capture flip-flop's clock by 100 ps (useful skew). What new risks must be checked?</p></ask>
+<sol><p>(1) <b>Hold</b> on every path into that flip-flop now has 100 ps less margin, and short paths into it may fail. (2) <b>Setup</b> on every path that <i>starts</i> at that flip-flop loses 100 ps, because it now launches later; the violation may simply move one stage downstream. (3) The added delay is subject to process and voltage variation, so the margin must hold across corners. Useful skew borrows time; it does not create it.</p></sol>
+</prob>
+</practice>
+</module>

@@ -1,0 +1,325 @@
+<module id="reference" num="R" nav="R" badge="Reference" numsub="and glossary" part="8" title="Reference: formulas, tables and glossary" short="Reference" blurb="The numbers, formulas, register settings and syntax used throughout the guide, collected for review and quick lookup, followed by a searchable glossary. Each section links to the module that derives or explains it.">
+
+<p>Everything on this page is derived or explained in an earlier module; the links lead back to the full treatment. Use it to check a formula during practice, to review before working the <ref to="interview" t="interview problem set"/> that follows, or to look up a register bit while writing code.</p>
+
+<h3>Numbers and codes</h3>
+<p>Powers of two (<ref to="numbers"/>). Memory capacities use binary prefixes (1 KiB = 2¹⁰ bytes, 1 MiB = 2²⁰, 1 GiB = 2³⁰, often written KB, MB and GB); data rates and frequencies use decimal ones (1 GB/s = 10⁹ bytes per second; 1 GHz is a period of 1 ns). Since 2¹⁰ ≈ 10³, 2³⁰ ≈ 10⁹ and 2⁴⁰ ≈ 10¹².</p>
+<grid cls="mono">n | 2ⁿ | n | 2ⁿ | n | 2ⁿ
+0 | 1 | 8 | 256 | 16 | 65,536
+1 | 2 | 9 | 512 | 20 | 1,048,576 (1 Mi)
+2 | 4 | 10 | 1,024 (1 Ki) | 24 | 16,777,216 (16 Mi)
+3 | 8 | 11 | 2,048 | 30 | 1,073,741,824 (1 Gi)
+4 | 16 | 12 | 4,096 (4 Ki) | 31 | 2,147,483,648
+5 | 32 | 13 | 8,192 | 32 | 4,294,967,296 (4 Gi)
+6 | 64 | 14 | 16,384 | 40 | ≈ 1.10 × 10¹² (1 Ti)
+7 | 128 | 15 | 32,768 | 64 | ≈ 1.84 × 10¹⁹</grid>
+<grid cls="mono">Hex | Decimal | Binary | Hex | Decimal | Binary
+0 | 0 | 0000 | 8 | 8 | 1000
+1 | 1 | 0001 | 9 | 9 | 1001
+2 | 2 | 0010 | A | 10 | 1010
+3 | 3 | 0011 | B | 11 | 1011
+4 | 4 | 0100 | C | 12 | 1100
+5 | 5 | 0101 | D | 13 | 1101
+6 | 6 | 0110 | E | 14 | 1110
+7 | 7 | 0111 | F | 15 | 1111</grid>
+<p>Integer ranges (<ref to="signed"/>):</p>
+<grid>Width | Unsigned | Two's complement | C types
+8 bits | 0 to 255 | −128 to 127 | uint8_t, int8_t
+16 bits | 0 to 65,535 | −32,768 to 32,767 | uint16_t, int16_t (int on the AVR)
+32 bits | 0 to 4,294,967,295 | −2,147,483,648 to 2,147,483,647 | uint32_t, int32_t (int on most 32- and 64-bit machines)
+64 bits | 0 to ≈ 1.84 × 10¹⁹ | ≈ −9.22 × 10¹⁸ to 9.22 × 10¹⁸ | uint64_t, int64_t
+n bits | 0 to 2ⁿ − 1 | −2ⁿ⁻¹ to 2ⁿ⁻¹ − 1 | </grid>
+<ul>
+<li><b>Negation</b> in two's complement: invert every bit and add 1, so −x = x′ + 1. The most negative value has no positive counterpart.</li>
+<li><b>Subtraction</b>: A − B = A + B′ + 1, an adder with inverted B and a carry in of 1.</li>
+<li><b>Overflow</b>: unsigned addition overflows when the carry out of the top bit is 1. Signed addition overflows when both operands have the same sign and the result has the other; equivalently V = (carry into the top bit) ⊕ (carry out of it).</li>
+<li><b>Extension</b>: sign-extend two's complement values by copying the sign bit into the new high bits; zero-extend unsigned values.</li>
+<li><b>Shifts</b>: a left shift by k multiplies by 2ᵏ; a logical right shift divides an unsigned value by 2ᵏ, rounding down; an arithmetic right shift divides a signed value by 2ᵏ, rounding toward −∞.</li>
+<li><b>Other codes</b> (<ref to="numbers"/>): BCD stores each decimal digit in 4 bits; excess-B stores u to represent u − B; Gray code g = b ⊕ (b ≫ 1) changes one bit per step; one-hot uses n bits for n values.</li>
+</ul>
+<p>Floating-point formats (<ref to="float"/>). Normal values are (−1)ˢ × 1.f × 2<sup>e − bias</sup>. An exponent field of all zeros encodes ±0 (f = 0) and subnormals (−1)ˢ × 0.f × 2<sup>1 − bias</sup>; all ones encodes ±∞ (f = 0) and NaN (f ≠ 0). Every integer up to 2<sup>p</sup> is exact, where p is the number of fraction bits plus one: 2²⁴ for FP32, 2⁵³ for FP64.</p>
+<grid>Format | Sign, exponent, fraction bits | Bias | Largest finite | Smallest normal | ulp of 1.0 (ε) | Decimal digits
+FP64 (double) | 1, 11, 52 | 1023 | ≈ 1.80 × 10³⁰⁸ | ≈ 2.23 × 10⁻³⁰⁸ | 2⁻⁵² ≈ 2.2 × 10⁻¹⁶ | ≈ 15.9
+FP32 (float) | 1, 8, 23 | 127 | ≈ 3.40 × 10³⁸ | ≈ 1.18 × 10⁻³⁸ | 2⁻²³ ≈ 1.2 × 10⁻⁷ | ≈ 7.2
+FP16 (half) | 1, 5, 10 | 15 | 65,504 | ≈ 6.10 × 10⁻⁵ | 2⁻¹⁰ ≈ 9.8 × 10⁻⁴ | ≈ 3.3
+BF16 | 1, 8, 7 | 127 | ≈ 3.39 × 10³⁸ | ≈ 1.18 × 10⁻³⁸ | 2⁻⁷ ≈ 7.8 × 10⁻³ | ≈ 2.4</grid>
+<p>ASCII essentials (<ref to="numbers"/>):</p>
+<grid>Characters | Codes | Useful fact
+'0' to '9' | 0x30 to 0x39 | the digit's value is c − '0'
+'A' to 'Z' | 0x41 to 0x5A |
+'a' to 'z' | 0x61 to 0x7A | lowercase = uppercase + 0x20: bit 5 is the case bit
+space | 0x20 |
+'\n' (line feed), '\r' (carriage return) | 0x0A, 0x0D |
+'\0' (NUL) | 0x00 | terminates C strings</grid>
+
+<h3>Boolean algebra</h3>
+<p>Each identity has a dual, obtained by swapping AND with OR and 0 with 1 (<ref to="boolean"/>).</p>
+<grid>Name | OR form | AND form
+Identity | X + 0 = X | X · 1 = X
+Null element | X + 1 = 1 | X · 0 = 0
+Idempotency | X + X = X | X · X = X
+Complement | X + X′ = 1 | X · X′ = 0
+Involution | (X′)′ = X |
+Distributivity | X + Y·Z = (X + Y)·(X + Z) | X·(Y + Z) = X·Y + X·Z
+Covering | X + X·Y = X | X·(X + Y) = X
+Combining | X·Y + X·Y′ = X | (X + Y)·(X + Y′) = X
+Simplification | X + X′·Y = X + Y | X·(X′ + Y) = X·Y
+Consensus | X·Y + X′·Z + Y·Z = X·Y + X′·Z | (X + Y)(X′ + Z)(Y + Z) = (X + Y)(X′ + Z)
+De Morgan | (X + Y)′ = X′·Y′ | (X·Y)′ = X′ + Y′</grid>
+<ul>
+<li><b>XOR</b>: X ⊕ Y = X·Y′ + X′·Y; X ⊕ 0 = X; X ⊕ 1 = X′; X ⊕ X = 0; (X ⊕ Y)′ = X ⊕ Y′ (XNOR). XOR is commutative and associative, and an n-input XOR is 1 when an odd number of its inputs are 1.</li>
+<li><b>Shannon expansion</b>: F = X′·F(X = 0) + X·F(X = 1), the basis of building any function from multiplexers (<ref to="blocks"/>).</li>
+<li><b>Complete sets</b>: {NAND}, {NOR}, {AND, NOT}, {OR, NOT}, and the 2-to-1 multiplexer. There are 2^(2ⁿ) distinct functions of n variables.</li>
+<li><b>Canonical forms</b> (<ref to="canonical"/>): F = Σm(minterms where F = 1) = ΠM(maxterms where F = 0). AND-OR logic equals NAND-NAND; OR-AND equals NOR-NOR.</li>
+<li><b>K-maps</b> (<ref to="kmaps"/>): rows and columns in Gray-code order (00, 01, 11, 10); a group of 2ᵏ adjacent 1s eliminates k variables; cover every 1 with the fewest, largest groups, starting with essential prime implicants.</li>
+</ul>
+
+<h3>Circuits and analog</h3>
+<grid>Quantity | Formula | Notes
+Ohm's law | V = I·R | <ref to="circuits"/>
+Power | P = V·I = I²·R = V²/R |
+Kirchhoff's laws | Σ currents into a node = 0; Σ voltages around a loop = 0 |
+Series and parallel | R = R₁ + R₂ + …;  1/R = 1/R₁ + 1/R₂ + …;  R₁ ∥ R₂ = R₁R₂/(R₁ + R₂) | a parallel combination is smaller than its smallest resistor
+Voltage divider | V<sub>out</sub> = V<sub>S</sub> · R₂/(R₁ + R₂) | a load R<sub>L</sub> appears in parallel with R₂; keep R<sub>L</sub> ≥ 10 × (R₁ ∥ R₂)
+Thévenin equivalent | V<sub>Th</sub> = open-circuit voltage; R<sub>Th</sub> = V<sub>oc</sub>/I<sub>sc</sub> | or the resistance seen with sources turned off
+Capacitor | Q = C·V;  i = C·dv/dt;  E = ½CV² | its voltage cannot change instantly
+Inductor | v = L·di/dt;  E = ½LI² | its current cannot change instantly; switched inductive loads need a flyback diode
+RC step response | v(t) = V<sub>final</sub> + (V<sub>initial</sub> − V<sub>final</sub>)·e<sup>−t/τ</sup>,  τ = RC | 63% of the change after τ, 86% after 2τ, 95% after 3τ, 99.3% after 5τ
+Rise time (10% to 90%) | t<sub>r</sub> = 2.2τ ≈ 0.35/f<sub>c</sub> |
+RC filter corner | f<sub>c</sub> = 1/(2πRC) | gain 1/√2 (−3 dB) at f<sub>c</sub>; first order falls 20 dB per decade beyond it
+Decibels | 20·log₁₀(V₂/V₁) = 10·log₁₀(P₂/P₁) | ×2 in voltage ≈ +6 dB; ×10 = +20 dB
+LED resistor | R = (V<sub>S</sub> − V<sub>F</sub>)/I<sub>F</sub> | <ref to="interfacing"/>
+Ideal op-amp, negative feedback | V₊ = V₋;  no input current | <ref to="analog"/>
+Inverting amplifier | V<sub>out</sub> = −(R<sub>f</sub>/R<sub>in</sub>)·V<sub>in</sub> | input resistance R<sub>in</sub>
+Non-inverting amplifier | V<sub>out</sub> = (1 + R<sub>f</sub>/R<sub>g</sub>)·V<sub>in</sub> | very high input resistance; follower when R<sub>f</sub> = 0
+Summing amplifier | V<sub>out</sub> = −R<sub>f</sub>·(V₁/R₁ + V₂/R₂ + …) | binary-weighted inputs make a simple DAC</grid>
+
+<h3>Conversion and I/O timing</h3>
+<grid>Quantity | Formula | Notes
+ADC step | 1 LSB = V<sub>ref</sub>/2ⁿ | <ref to="analog"/>
+ADC code | code = ⌊V<sub>in</sub> · 2ⁿ/V<sub>ref</sub>⌋, at most 2ⁿ − 1 | ATmega328P: 10 bits; with ADLAR = 1, ADCH holds the top 8
+Quantization noise | SQNR ≈ 6.02n + 1.76 dB | ENOB = (SINAD − 1.76)/6.02
+Sampling | f<sub>s</sub> &gt; 2·f<sub>max</sub> (Nyquist) | a tone at f appears at its distance from the nearest multiple of f<sub>s</sub>
+DAC output | V<sub>out</sub> = V<sub>ref</sub> · code/2ⁿ | R-2R ladders need only two resistor values
+PWM average | V<sub>avg</sub> = D · V<sub>high</sub>,  D = t<sub>on</sub>/T | <ref to="interrupts"/>
+Timer, CTC mode | period = (OCR + 1) · N/f<sub>clk</sub>  ⇒  OCR = f<sub>clk</sub> · period/N − 1 | N = prescaler (1, 8, 64, 256, 1024)
+Timer, fast PWM | f<sub>PWM</sub> = f<sub>clk</sub>/(N · (TOP + 1));  duty = (OCR + 1)/(TOP + 1) | TOP = 255 for 8-bit mode
+UART | bit time = 1/baud;  an 8N1 frame is 10 bits | AVR: UBRR = f<sub>clk</sub>/(16 · baud) − 1 (<ref to="devices"/>)
+Noise margins | NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub>;  NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub> | <ref to="interfacing"/>
+Fan-out | min(\|I<sub>OH</sub>\|/\|I<sub>IH</sub>\|, I<sub>OL</sub>/I<sub>IL</sub>) | DC limit; capacitance also slows edges
+Open-drain pull-up | R ≥ (V<sub>DD</sub> − V<sub>OL</sub>)/I<sub>OL</sub>;  rise time to V<sub>IH</sub>: t = RC · ln(V<sub>DD</sub>/(V<sub>DD</sub> − V<sub>IH</sub>)) | smaller R: faster edges, more current</grid>
+
+<h3>CMOS, power and manufacturing</h3>
+<grid>Quantity | Formula | Notes
+Dynamic power | P = α · C · V<sub>DD</sub>² · f | α = fraction of the capacitance switched per cycle (<ref to="cmos"/>)
+Energy per operation | E ≈ α · C · V<sub>DD</sub>² | independent of f: lowering V saves energy quadratically
+Static power | P = V<sub>DD</sub> · I<sub>leak</sub> | rises steeply with temperature and with lower threshold voltage
+Gate delay | t ∝ C · V<sub>DD</sub>/I<sub>on</sub> | slower at low voltage and high temperature
+Logical effort | g = 1 (inverter), 4/3 (NAND2), 5/3 (NOR2);  stage delay = g·h + p | best stage effort ≈ 4; stages N ≈ log₄(path effort)
+Static CMOS gate | NMOS pull-down network conducts when F = 0; PMOS pull-up network is its dual (series ↔ parallel) | inverting gates only
+Junction temperature | T<sub>J</sub> = T<sub>A</sub> + P · (θ<sub>JC</sub> + θ<sub>CS</sub> + θ<sub>SA</sub>) | θ in °C/W (<ref to="chipflow"/>)
+Supply droop | ΔV = I·R + L·di/dt | decoupling capacitors supply fast current steps
+Yield (Poisson model) | Y = e<sup>−D·A</sup> | D = defects per unit area, A = die area
+Dies per wafer | ≈ π(d/2)²/A − π·d/√(2A) | d = wafer diameter
+Cost per good die | wafer cost/(dies per wafer × Y) | grows faster than linearly with area</grid>
+
+<h3>Timing</h3>
+<p>With δ = (capture clock arrival) − (launch clock arrival) (<ref to="timing"/>):</p>
+<grid>Check | Formula | Notes
+Setup (maximum delay) | T + δ ≥ t<sub>clk→Q</sub> + t<sub>pd,max</sub> + t<sub>setup</sub> + t<sub>jitter</sub> | fixed by a longer period or a faster path
+Hold (minimum delay) | t<sub>clk→Q,min</sub> + t<sub>cd</sub> ≥ t<sub>hold</sub> + δ | independent of T: fixed only by adding delay or reducing skew
+Maximum frequency | f<sub>max</sub> = 1/(t<sub>clk→Q</sub> + t<sub>pd,max</sub> + t<sub>setup</sub>) | for zero skew
+Slack | required time − arrival time | negative slack is a violation
+Synchronizer MTBF | MTBF = e<sup>t<sub>r</sub>/τ</sup>/(T₀ · f<sub>clk</sub> · f<sub>data</sub>) | each extra stage adds about one period to t<sub>r</sub>
+Pipeline stage | T ≥ (slowest stage logic) + t<sub>clk→Q</sub> + t<sub>setup</sub> | throughput 1/T; latency = stages × T (<ref to="perf"/>)
+Ring oscillator | f = 1/(2 · N · t<sub>pd</sub>), N odd |
+FIFO depth for a burst | depth ≥ B · (1 − f<sub>read</sub>/f<sub>write</sub>) | burst of B words, one word per cycle on each side</grid>
+
+<h3>Performance, caches and memory</h3>
+<grid>Quantity | Formula | Notes
+Execution time | IC × CPI × T<sub>clk</sub> = IC × CPI/f | the "iron law" (<ref to="perf"/>)
+CPI with stalls | CPI = CPI<sub>base</sub> + Σ (events per instruction × penalty cycles) | loads, branch mispredictions, cache misses
+Amdahl's law | speedup = 1/((1 − p) + p/s) ≤ 1/(1 − p) | p = fraction improved, s = its speedup
+Average memory access time | AMAT = hit time + miss rate × miss penalty | two levels: t₁ + m₁ · (t₂ + m₂ · t<sub>mem</sub>), m₂ = local L2 miss rate (<ref to="caches"/>)
+Cache organization | lines = capacity/line size;  sets = lines/ways | direct mapped: 1 way; fully associative: 1 set
+Address fields | offset = log₂(line size);  index = log₂(sets);  tag = address bits − index − offset |
+Page tables | VPN bits = VA bits − log₂(page size);  bits per level = log₂(page size/PTE size) | x86-64: 48 = 12 + 4 × 9
+TLB reach | TLB entries × page size |
+Little's law | data in flight = bandwidth × latency | outstanding requests needed to sustain a bandwidth (<ref to="parallel"/>)</grid>
+
+<h3>GPUs and parallel programs</h3>
+<grid>Quantity | Formula | Notes
+Global thread index | i = blockIdx.x · blockDim.x + threadIdx.x | <ref to="parallel"/>
+Blocks for n elements | (n + T − 1)/T for T threads per block | guard with if (i &lt; n)
+Warp | 32 threads executing one instruction in lockstep | divergent paths execute one after the other
+Occupancy | resident warps/maximum warps | register limit: threads ≤ registers per SM/registers per thread
+Shared-memory bank | bank = (byte address/4) mod 32 | k threads on different words of one bank: k-way conflict; one shared word is broadcast
+Roofline | attainable = min(peak FLOP/s, bandwidth × AI) | ridge point AI = peak/bandwidth
+Arithmetic intensity | FLOPs performed/bytes moved to and from DRAM | FP32 vector add: 1/12; N × N matrix multiply: up to N/6
+Tiling | T × T tiles in shared memory reuse each loaded element T times | global traffic falls by about T</grid>
+
+<h3>ATmega328P registers</h3>
+<p>Registers and bits used in the embedded modules (<ref to="mcu"/>, <ref to="interrupts"/>, <ref to="devices"/>). Bits are set with <code>REG |= (1 &lt;&lt; BIT)</code> and cleared with <code>REG &amp;= ~(1 &lt;&lt; BIT)</code>.</p>
+<grid>Register | Bits and meaning
+DDRB, DDRC, DDRD | direction of each pin: 1 = output, 0 = input
+PORTB, PORTC, PORTD | for an output pin, the level driven; for an input pin, 1 enables the internal pull-up
+PINB, PINC, PIND | the present level of each pin (read these, not PORTx, to sense an input)
+ADMUX | REFS1:0 (01 = AVCC reference) · ADLAR (1 = left-adjusted result) · MUX3:0 (input channel)
+ADCSRA | ADEN (enable) · ADSC (write 1 to start; reads 1 until done) · ADATE (auto-trigger) · ADIF, ADIE (flag, interrupt enable) · ADPS2:0 (111 = clock ÷ 128, 125 kHz at 16 MHz)
+ADCH, ADCL (ADC) | conversion result; with ADLAR = 1, ADCH alone holds the top 8 bits
+TCCR1A | COM1A1:0, COM1B1:0 (what the OC1A and OC1B pins do on a compare match) · WGM11:10 (low waveform-mode bits)
+TCCR1B | WGM13:12 (WGM12 = 1 selects CTC with TOP = OCR1A) · CS12:10 (clock select: 001 ÷1, 010 ÷8, 011 ÷64, 100 ÷256, 101 ÷1024; 000 stops the timer)
+TCNT1, OCR1A, OCR1B, ICR1 | the 16-bit count; compare values; input-capture register, or TOP in some PWM modes
+TIMSK1, TIFR1 | OCIE1A, OCIE1B, TOIE1 interrupt enables; OCF1A, OCF1B, TOV1 flags (cleared when the ISR runs or by writing 1)
+SREG (I bit) | global interrupt enable: <code>sei()</code> sets it, <code>cli()</code> clears it; <code>ISR(TIMER1_COMPA_vect) { … }</code> defines a handler
+PCICR, PCMSK0/1/2 | PCIE0/1/2 enable pin-change interrupts for ports B, C, D; the mask registers choose the pins (PCINT0–7, 8–14, 16–23)
+EICRA, EIMSK | INT0 (PD2) and INT1 (PD3): edge or level selection, and enables
+UBRR0 | baud-rate divisor: f<sub>clk</sub>/(16 · baud) − 1 (103 for 9600 baud at 16 MHz)
+UCSR0A, UCSR0B, UCSR0C | UDRE0 (transmit buffer empty), RXC0 (byte received) · RXEN0, TXEN0, RXCIE0 · UCSZ01:00 = 11 for 8 data bits
+UDR0 | write to transmit a byte; read to receive one</grid>
+<p>Character LCD commands (HD44780 controller, <ref to="devices"/>). RS = 0 selects a command and RS = 1 character data; the controller latches the data lines on the falling edge of E; in 4-bit mode each byte is sent upper nibble first.</p>
+<grid cls="mono">Command | Code | Notes
+Clear display | 0x01 | about 1.5 ms
+Return home | 0x02 | about 1.5 ms
+Entry mode: increment, no shift | 0x06 |
+Display on, cursor off | 0x0C | 0x0F also shows a blinking cursor
+Function set: 4-bit, 2 lines, 5 × 8 dots | 0x28 |
+Move the cursor | 0x80 + column (row 0), 0xC0 + column (row 1) | row 1 starts at address 0x40</grid>
+
+<h3>Verilog at a glance</h3>
+<grid>Construct | Example | Notes
+Module and ports | `module m (input wire a, b, output reg y);` | <ref to="verilog"/>
+Sized literals | `8'hFF`, `4'b10x1`, `16'd100` | width'base value; x = unknown, z = high impedance
+Continuous assignment | `assign y = s ? b : a;` | combinational; drives a wire
+Combinational block | `always @* begin ... end` | blocking (=); assign every output on every path, or a latch is inferred
+Clocked block | `always @(posedge clk) q <= d;` | nonblocking (<=) for every register
+Asynchronous reset | `always @(posedge clk or posedge rst) if (rst) q <= 0; else q <= d;` | release it through a reset synchronizer
+Case | `case (s) 2'b00: y = a; ... default: y = 0; endcase` | the default prevents latches
+Concatenation, replication | `{a, b}`, `{4{1'b0}}`, `{{8{x[7]}}, x}` | the last sign-extends 8 bits to 16
+Reduction | `&v`, `\|v`, `^v` | AND, OR or XOR of all bits; ^v is the parity
+Shifts | `<<`, `>>`, `>>>` | `>>>` is arithmetic for signed operands
+Equality | `==`, `===` | == gives x when an operand has x or z bits; === compares exactly (simulation only)
+Parameters | `module c #(parameter W = 8) (...);  c #(.W(16)) u1 (...);` | override per instance
+Generate loop | `for (i = 0; i < N; i = i + 1) begin : g ... end` | inside generate, with genvar i; replicates hardware
+Testbench clock | `always #5 clk = ~clk;` | a 10-time-unit period</grid>
+<p>Rules that prevent most RTL bugs: blocking assignments in combinational blocks and nonblocking in clocked ones; never assign one variable from two always blocks; give every combinational output a value on every path; pass every asynchronous input through a synchronizer; keep delays, <code>initial</code> blocks and <code>$display</code> out of synthesizable code.</p>
+
+<h3>C and C++ bit manipulation</h3>
+<grid>Task | Expression | Notes
+Set bit n | `x \|= 1u << n` | <ref to="mcu"/>
+Clear bit n | `x &= ~(1u << n)` |
+Toggle bit n | `x ^= 1u << n` |
+Test bit n | `(x >> n) & 1u` |
+Mask of the low w bits | `(1u << w) - 1` | w must be less than the width of the type
+Extract a w-bit field at bit p | `(x >> p) & ((1u << w) - 1)` |
+Insert v into that field | `x = (x & ~(m << p)) \| ((v & m) << p)` | with m = (1u &lt;&lt; w) − 1
+x mod 2ᵏ | `x & ((1u << k) - 1)` | unsigned x; ring-buffer indices
+Round up to a multiple of 2ᵏ | `(x + (1u << k) - 1) & ~((1u << k) - 1)` | alignment
+Power of two? | `x && !(x & (x - 1))` |
+Isolate the lowest set bit | `x & -x` | unsigned x
+Clear the lowest set bit | `x & (x - 1)` | loop until 0 to count bits
+Count set bits | `__builtin_popcount(x)`, `std::popcount(x)` | GCC and Clang; C++20 header &lt;bit&gt;
+Sign-extend a b-bit field | `(int32_t)(x ^ m) - (int32_t)m` | m = 1u &lt;&lt; (b − 1); x holds the field in its low b bits
+Binary to Gray | `g = b ^ (b >> 1)` |
+Swap without a temporary | `a ^= b; b ^= a; a ^= b;` | fails if a and b are the same object</grid>
+<p>Rules to remember (<ref to="mcu"/>, <ref to="interrupts"/>): shifting by the width of the type or more, and signed overflow, are undefined behavior; unsigned arithmetic wraps modulo 2ⁿ; operands narrower than int are promoted to int before arithmetic; hardware registers and variables shared with interrupt handlers must be <code>volatile</code>, and multi-byte shared variables must be read with interrupts disabled.</p>
+
+<h3>Glossary</h3>
+<p>Every definition from the guide, plus other key terms, in alphabetical order. Each term links to the place where it is explained.</p>
+<glossary/>
+
+<gterm t="Amdahl's law" to="perf">The overall speedup from making a fraction p of a task s times faster: 1/((1 − p) + p/s), which can never exceed 1/(1 − p) however large s becomes.</gterm>
+<gterm t="Arithmetic intensity" to="parallel">The number of arithmetic operations a program performs per byte it moves to or from main memory. Through the roofline model it decides whether the program is limited by memory bandwidth or by compute.</gterm>
+<gterm t="Arithmetic logic unit (ALU)" to="arith">A combinational block that performs the arithmetic or logical operation selected by its control inputs and reports status flags such as zero, negative, carry and overflow.</gterm>
+<gterm t="Asynchronous FIFO" to="timing">A queue whose write side and read side run on different clocks. Gray-coded pointers cross between the domains through synchronizers so the full and empty flags can be computed safely.</gterm>
+<gterm t="Average memory access time (AMAT)" to="caches">Hit time + miss rate × miss penalty, applied level by level through a memory hierarchy.</gterm>
+<gterm t="Bank conflict" to="parallel">Two or more threads of a warp accessing different words in the same shared-memory bank in one instruction, which forces the hardware to serialize the accesses.</gterm>
+<gterm t="Binary-coded decimal (BCD)" to="numbers">A code that stores each decimal digit separately in 4 bits, using the patterns 0000 to 1001.</gterm>
+<gterm t="Branch prediction" to="perf">Guessing the outcome of a branch so that a pipeline can keep fetching instructions; a wrong guess flushes the instructions fetched after it and costs a penalty of several cycles.</gterm>
+<gterm t="Cache coherence" to="parallel">The guarantee that all cores see one consistent order of values for each memory location even though each has a private cache; maintained by protocols such as MESI.</gterm>
+<gterm t="Cache line" to="caches">The unit of data that a cache stores and transfers, typically 64 bytes, with one tag for the whole line. Also called a block.</gterm>
+<gterm t="Carry-lookahead adder" to="arith">An adder that computes its carries from generate (g = a·b) and propagate (p = a ⊕ b) signals in a tree, so its delay grows with the logarithm of the width instead of linearly.</gterm>
+<gterm t="Clock domain crossing (CDC)" to="timing">A signal passing between logic clocked by unrelated clocks. It needs a synchronizer, a handshake or an asynchronous FIFO, depending on what is being passed.</gterm>
+<gterm t="Clock gating" to="registers">Stopping the clock of idle registers to save dynamic power, using an integrated clock-gating cell (a latch and an AND gate) so that no glitches reach the clock.</gterm>
+<gterm t="Clock skew" to="timing">The difference between the arrival times of the same clock edge at two flip-flops. It adds to the margin of one of the setup and hold checks and subtracts from the other.</gterm>
+<gterm t="CMOS" to="cmos">Complementary MOS logic: each gate has a PMOS pull-up network and a dual NMOS pull-down network, so that in steady state one of them is off and almost no current flows.</gterm>
+<gterm t="Coalescing" to="parallel">Combining the memory accesses of the 32 threads of a warp into as few wide transactions as possible, which happens when consecutive threads access consecutive addresses.</gterm>
+<gterm t="Control unit" to="datapath">The logic, a decoder or a state machine, that generates the signals steering a datapath through each instruction.</gterm>
+<gterm t="Critical path" to="timing">The slowest register-to-register path in a design; it sets the minimum clock period.</gterm>
+<gterm t="Data race" to="parallel">Two threads accessing the same memory location concurrently without synchronization, at least one of them writing. It is undefined behavior in C and C++.</gterm>
+<gterm t="Datapath" to="datapath">The part of a processor that holds and transforms data: registers, the ALU, multiplexers and the connections between them, steered by control signals.</gterm>
+<gterm t="De Morgan's theorems" to="boolean">(X·Y)′ = X′ + Y′ and (X + Y)′ = X′·Y′: the complement of an AND is the OR of the complements, and the complement of an OR is the AND of the complements.</gterm>
+<gterm t="Debouncing" to="swfsm">Filtering the rapid transitions a mechanical switch produces when it opens or closes, by accepting a new level only after the input has been stable for several milliseconds.</gterm>
+<gterm t="Don't-care" to="kmaps">An input combination whose output value does not matter, because it never occurs or its output is ignored. It may be treated as 0 or 1, whichever gives the simpler circuit.</gterm>
+<gterm t="DRAM" to="memory">Dynamic RAM: one transistor and one capacitor per bit. It is dense and cheap, but reading is destructive and every cell must be refreshed periodically.</gterm>
+<gterm t="Duty cycle" to="interrupts">The fraction of each period that a periodic signal spends high. A PWM signal with duty cycle D averages to D × V<sub>high</sub>.</gterm>
+<gterm t="Dynamic power" to="cmos">The power spent charging and discharging capacitance as signals switch, α·C·V²·f.</gterm>
+<gterm t="Edge-triggered" to="latches">Sampling an input only at a clock transition, as a flip-flop does, rather than throughout a clock level, as a latch does.</gterm>
+<gterm t="Excess-B (biased) code" to="signed">A representation in which the stored unsigned value u stands for u − B. IEEE 754 uses it for exponents.</gterm>
+<gterm t="Fan-out" to="interfacing">The number of inputs a gate output drives, limited by the current the output can supply and by the capacitance it must charge.</gterm>
+<gterm t="Fixed-point number" to="float">A fraction represented as an integer with an implied binary point at an agreed position, such as Q8.8; its arithmetic is integer arithmetic plus scaling.</gterm>
+<gterm t="Flip-flop" to="latches">An edge-triggered storage element: it captures its D input at the active clock edge and holds it until the next one.</gterm>
+<gterm t="Forwarding" to="perf">Routing a result from a later pipeline stage straight to the ALU inputs of a following instruction, so that it need not wait for the register write. Also called bypassing.</gterm>
+<gterm t="FPGA" to="memory">Field-programmable gate array: a chip of lookup tables, flip-flops, memory blocks and arithmetic units joined by programmable routing, configured after manufacture to implement a digital design.</gterm>
+<gterm t="Full adder" to="arith">A circuit that adds three bits A, B and C<sub>in</sub>, producing S = A ⊕ B ⊕ C<sub>in</sub> and C<sub>out</sub> = A·B + C<sub>in</sub>·(A ⊕ B).</gterm>
+<gterm t="Gray code" to="numbers">An ordering of binary codes in which consecutive values differ in exactly one bit; g = b ⊕ (b ≫ 1).</gterm>
+<gterm t="Hamming code" to="numbers">An error-correcting code that adds parity bits over overlapping subsets of the data bits, so the pattern of failed checks locates any single-bit error.</gterm>
+<gterm t="Hazard (static)" to="kmaps">A momentary glitch at a combinational output that should stay constant, caused by unequal path delays when one input changes. Adding the consensus term removes it.</gterm>
+<gterm t="Hold time" to="timing">The minimum time a flip-flop's input must stay stable after the active clock edge.</gterm>
+<gterm t="I²C" to="devices">Inter-integrated circuit: a two-wire (SDA, SCL), open-drain bus on which a controller addresses devices by 7-bit address and every byte is acknowledged.</gterm>
+<gterm t="IEEE 754" to="float">The standard floating-point formats and arithmetic rules: sign, biased exponent and fraction with a hidden leading 1, plus zeros, subnormals, infinities and NaNs, with correctly rounded operations.</gterm>
+<gterm t="Interrupt service routine (ISR)" to="interrupts">A function the processor runs automatically when an enabled interrupt occurs. It should be short, and variables it shares with the main program must be volatile and accessed atomically.</gterm>
+<gterm t="Karnaugh map (K-map)" to="kmaps">A truth table laid out in Gray-code order so that minterms differing in one variable are adjacent, which makes the largest groupings, and the minimal expression, visible.</gterm>
+<gterm t="Latch" to="latches">A level-sensitive storage element: transparent, with the output following the input, while its enable is active, and holding its value while the enable is inactive.</gterm>
+<gterm t="Linear-feedback shift register (LFSR)" to="registers">A shift register whose input is the XOR of selected bits. With the right taps it cycles through all 2ⁿ − 1 nonzero states, producing pseudo-random sequences.</gterm>
+<gterm t="Little's law" to="parallel">In a steady-state system, the average number of items inside equals the throughput multiplied by the time each spends inside. For memory: data in flight = bandwidth × latency.</gterm>
+<gterm t="Load-use hazard" to="perf">An instruction that needs the value loaded by the instruction just before it. The value arrives too late for forwarding, which costs one stall cycle in the classic five-stage pipeline.</gterm>
+<gterm t="Lookup table (LUT)" to="memory">A small memory addressed by a function's inputs that holds the function's truth table; the basic logic element of an FPGA.</gterm>
+<gterm t="Mealy machine" to="fsm">A state machine whose outputs depend on the current state and the current inputs.</gterm>
+<gterm t="Metastability" to="timing">A flip-flop state between 0 and 1 that can last for an unbounded time when the input changes inside the setup-and-hold window. The probability that it persists decays exponentially with the time allowed.</gterm>
+<gterm t="Moore machine" to="fsm">A state machine whose outputs depend only on the current state.</gterm>
+<gterm t="Noise margin" to="interfacing">The noise voltage a logic signal can tolerate before it may be misread: NM<sub>H</sub> = V<sub>OH</sub> − V<sub>IH</sub> and NM<sub>L</sub> = V<sub>IL</sub> − V<sub>OL</sub>.</gterm>
+<gterm t="Nonblocking assignment" to="verilog">The Verilog &lt;= assignment: all right-hand sides in a time step are evaluated before any left-hand side changes, which models flip-flops that all sample at the same edge.</gterm>
+<gterm t="Nyquist rate" to="analog">Twice the highest frequency present in a signal. Sampling more slowly causes aliasing, in which high frequencies appear as false low ones.</gterm>
+<gterm t="Occupancy" to="parallel">The number of warps resident on a GPU multiprocessor as a fraction of the maximum, limited by registers, shared memory and block limits.</gterm>
+<gterm t="One-hot code" to="numbers">A code of n bits for n values with exactly one bit set; used for state encodings and select signals because decoding it is trivial.</gterm>
+<gterm t="Open-drain output" to="interfacing">An output that can only pull low or let go. A pull-up resistor supplies the high level, so several outputs can share one wire without conflict.</gterm>
+<gterm t="Out-of-order execution" to="perf">Executing instructions as soon as their operands are ready rather than in program order, while a reorder buffer commits the results in order to keep exceptions precise.</gterm>
+<gterm t="Parity bit" to="numbers">An extra bit chosen so that the total number of 1s is even (or odd), so that any single-bit error is detected.</gterm>
+<gterm t="Pipelining" to="perf">Dividing an operation into stages separated by registers so that several operations are in progress at once, which raises throughput at a cost in latency and hazards.</gterm>
+<gterm t="Priority encoder" to="blocks">A circuit that outputs the index of its highest-priority active input, together with a flag saying whether any input is active.</gterm>
+<gterm t="Pull-up resistor" to="interfacing">A resistor to the supply that sets the level of a line when nothing drives it, used with buttons, open-drain buses and unused inputs.</gterm>
+<gterm t="Pulse-width modulation (PWM)" to="interrupts">Controlling an average voltage or power by switching fully on and fully off at a fixed frequency and varying the duty cycle.</gterm>
+<gterm t="Register file" to="datapath">The array of a processor's general-purpose registers, with typically two read ports and one write port.</gterm>
+<gterm t="Ripple-carry adder" to="arith">An n-bit adder made of n full adders in a chain, each passing its carry to the next. It is simple, but its delay grows linearly with n.</gterm>
+<gterm t="Roofline model" to="parallel">A bound on performance: attainable FLOP/s = min(peak FLOP/s, memory bandwidth × arithmetic intensity).</gterm>
+<gterm t="Scan chain" to="chipflow">A test structure in which a multiplexer at each flip-flop's input links the flip-flops into one long shift register in test mode, giving direct control and observation of the internal state.</gterm>
+<gterm t="Schmitt trigger" to="analog">A comparator with two thresholds (hysteresis), so a slowly changing or noisy input produces one clean transition instead of several.</gterm>
+<gterm t="Setup time" to="timing">The minimum time a flip-flop's input must be stable before the active clock edge.</gterm>
+<gterm t="Shannon expansion" to="blocks">F = X′·F(X = 0) + X·F(X = 1): any function can be split on one variable into two smaller functions, which is how multiplexers implement arbitrary logic.</gterm>
+<gterm t="Shift register" to="registers">A chain of flip-flops, each feeding the next, that moves data one position per clock; used for serial-to-parallel conversion, delays and LFSRs.</gterm>
+<gterm t="Sign extension" to="signed">Widening a two's complement number by copying its sign bit into the new high-order bits, which preserves its value.</gterm>
+<gterm t="SIMT" to="parallel">Single instruction, multiple threads: the GPU execution model in which a warp executes one instruction stream in lockstep, each thread with its own registers and data.</gterm>
+<gterm t="Slack" to="timing">The margin by which a timing path meets its requirement: required time minus arrival time. Negative slack is a violation.</gterm>
+<gterm t="SPI" to="devices">Serial Peripheral Interface: a synchronous, full-duplex bus with a clock, two data lines and one select line per peripheral.</gterm>
+<gterm t="SRAM" to="memory">Static RAM: each bit is a pair of cross-coupled inverters with two access transistors, six transistors in all. It is fast and needs no refresh; caches and register files use it.</gterm>
+<gterm t="Static timing analysis (STA)" to="timing">Checking every register-to-register path against the setup and hold requirements by adding up worst-case and best-case delays, without simulating any inputs.</gterm>
+<gterm t="Successive-approximation ADC" to="analog">An analog-to-digital converter that finds its output code by binary search, one bit per step, using an internal DAC and a comparator.</gterm>
+<gterm t="Sum of products (SOP)" to="canonical">A Boolean expression written as an OR of AND terms, which maps directly onto two-level AND-OR or NAND-NAND logic.</gterm>
+<gterm t="Synchronizer" to="timing">Two or more flip-flops in series in the receiving clock domain, which give a possibly metastable sample time to resolve before the rest of the logic uses it.</gterm>
+<gterm t="Synthesis" to="verilog">The automatic translation of RTL code and timing constraints into a netlist of gates from a standard-cell library.</gterm>
+<gterm t="Testbench" to="verilog">Simulation-only code that drives a design under test and checks its outputs, ideally against a reference model.</gterm>
+<gterm t="Thévenin equivalent" to="circuits">Seen from two terminals, any linear network behaves as one voltage source in series with one resistor: V<sub>Th</sub> is the open-circuit voltage and R<sub>Th</sub> the resistance seen with the sources turned off.</gterm>
+<gterm t="Time constant" to="circuits">τ = RC for a resistor-capacitor circuit: the time a step response takes to cover 63% of its remaining change.</gterm>
+<gterm t="Translation lookaside buffer (TLB)" to="caches">A small cache of recent virtual-to-physical page translations, which lets most memory accesses skip the page-table walk.</gterm>
+<gterm t="Transmission gate" to="cmos">An NMOS and a PMOS transistor in parallel, driven by complementary signals, forming a switch that passes both 0 and 1 at full strength.</gterm>
+<gterm t="Tristate output" to="cmos">An output with a third, high-impedance state in which it drives neither high nor low, so that several outputs can take turns driving a shared bus wire.</gterm>
+<gterm t="UART" to="devices">Universal asynchronous receiver/transmitter: sends bytes as frames of a start bit, data bits and a stop bit at an agreed bit rate, with no shared clock.</gterm>
+<gterm t="Virtual memory" to="caches">Translating each program's virtual addresses to physical addresses page by page through page tables, which isolates programs and lets memory be allocated in pages.</gterm>
+<gterm t="volatile" to="interrupts">A C and C++ qualifier telling the compiler that an object may change, or that accessing it has effects, outside the code it can see, so every access written in the source must actually be performed.</gterm>
+<gterm t="Warp" to="parallel">A group of 32 GPU threads that are scheduled together and execute the same instruction at the same time.</gterm>
+<gterm t="Warp divergence" to="parallel">Threads of one warp taking different paths through a branch, which the warp executes one after the other with the inactive threads disabled.</gterm>
+<gterm t="Watchdog timer" to="interrupts">A hardware timer that resets the processor unless software restarts it periodically, so that a hung program is recovered automatically.</gterm>
+<gterm t="Write-back cache" to="caches">A cache that updates only its own copy on a store and writes a modified (dirty) line to the next level when the line is evicted.</gterm>
+<gterm t="Yield" to="chipflow">The fraction of manufactured dies that work. In the Poisson model it is e<sup>−D·A</sup> for defect density D and die area A.</gterm>
+</module>

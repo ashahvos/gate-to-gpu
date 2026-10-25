@@ -1,0 +1,136 @@
+<module id="blocks" num="8" part="2" title="Decoders, encoders, multiplexers and buses" short="Decoders and muxes" pre="canonical" blurb="The standard combinational building blocks that larger designs are assembled from: decoders with enables and how to build big ones from small ones, encoders and priority encoders, multiplexers and mux trees, implementing any function with a decoder or a mux, and sharing a wire between several drivers with tri-state buffers.">
+
+<p>Designing every function gate by gate does not scale. Real designs are built hierarchically from a small set of well-understood blocks, each with a clear interface, and the blocks in this module appear in nearly every digital system: decoders select one of many things by number, encoders do the reverse, multiplexers choose which of several signals passes through, and tri-state drivers let several sources share one wire. Each is also a general-purpose way to implement logic functions.</p>
+
+<h3>Buses and hierarchical notation</h3>
+<p>A <b>bus</b> is a group of wires carrying one multi-bit value. In diagrams a bus is drawn as one thick line with a slash and a width (/8), and its bits are named with a range: D[7:0] has D[7] as the MSB and D[0] as the LSB. A block that operates on whole buses, such as an 8-bit 2-to-1 multiplexer, is internally eight identical 1-bit blocks sharing their control signals. That regularity is what makes wide datapaths easy to design and to lay out.</p>
+
+<h3>Decoders</h3>
+<def term="Decoder">
+<p>A block with n inputs and 2ⁿ outputs that asserts exactly one output: the one whose index equals the binary value of the input. Equivalently, output Y<sub>i</sub> is the minterm m<sub>i</sub> of the inputs. The output pattern is one-hot.</p>
+</def>
+<diagram name="decoder24">A 2-to-4 decoder needs only an inverter per input and one AND gate per output. Each AND gate detects one input combination.</diagram>
+<p>Most decoders have an <b>enable</b> input: when it is inactive, all outputs are inactive regardless of the address. Enable is simply an extra input to every AND gate, so an enabled decoder computes Y<sub>i</sub> = EN·m<sub>i</sub>. Many standard parts (the classic 74x138 3-to-8 decoder, for example) have <b>active-low</b> outputs: the selected output is 0 and all others are 1. On a schematic, active-low signals are marked with a bubble or a name ending in _L, _N or a prime.</p>
+<h4>Building larger decoders from smaller ones</h4>
+<p>A large decoder is built as a tree: a first-level decoder on the most significant address bits drives the <b>enables</b> of second-level decoders, each of which decodes the remaining bits.</p>
+<diagram name="decoder_tree">A 3-to-8 decoder from a 1-to-2 decoder and two 2-to-4 decoders. A2 picks which bank is enabled; A1 A0 pick the output within the bank. The same scheme builds a 4-to-16 decoder from five 2-to-4 decoders.</diagram>
+<p>Decoders are how memories select a location. A memory with 2²⁰ words cannot use a single decoder with a million AND gates driving one long line each; instead the address is split into a row part and a column part, a row decoder selects one row of the cell array, and a column multiplexer selects a word within it (<ref to="memory"/>).</p>
+<h4>A decoder implements any function</h4>
+<p>Because the outputs of a decoder are the minterms of its inputs, ORing the right outputs gives any function in canonical SOP form. A 3-to-8 decoder plus two OR gates is a full adder: S = Y1 + Y2 + Y4 + Y7 and C<sub>out</sub> = Y3 + Y5 + Y6 + Y7. With active-low outputs, use NAND gates instead of OR, by De Morgan: Y1 + Y2 + Y4 + Y7 = (Y1′·Y2′·Y4′·Y7′)′. This approach is efficient when one decoder serves many functions of the same inputs.</p>
+
+<h3>Encoders and priority encoders</h3>
+<p>An <b>encoder</b> is the inverse of a decoder: it takes a one-hot input of 2ⁿ lines and outputs the n-bit index of the active one. A 4-to-2 encoder is Y1 = I2 + I3, Y0 = I1 + I3. If more than one input is active, a plain encoder produces a meaningless OR of codes, and if none is active it outputs 0, indistinguishable from "input 0 active".</p>
+<p>A <b>priority encoder</b> fixes both problems: it reports the index of the highest-priority active input and adds a <b>valid</b> output that is 1 when any input is active. With inputs A (highest priority), B, C, D (lowest) mapped to codes 3, 2, 1, 0:</p>
+<truth h="A B C D | G1 G0 V">1 X X X | 1 1 1; 0 1 X X | 1 0 1; 0 0 1 X | 0 1 1; 0 0 0 1 | 0 0 1; 0 0 0 0 | 0 0 0</truth>
+<p>The X entries in the input columns mean "any value" (each row stands for several truth-table rows). Reading the table: G1 = A + A′B = <b>A + B</b>; G0 = A + A′B′C = <b>A + B′C</b> (simplification theorem); V = <b>A + B + C + D</b>. Interrupt controllers use priority encoders to pick which pending request to service first, and floating-point hardware uses them as leading-one detectors for normalization.</p>
+
+<h3>Multiplexers</h3>
+<def term="Multiplexer (mux)">
+<p>A block with 2ⁿ data inputs, n select inputs and one output, which passes the data input whose index equals the select value. A 2-to-1 mux computes Y = S′·I0 + S·I1.</p>
+</def>
+<p>Written out, a 4-to-1 mux is Y = S1′S0′·I0 + S1′S0·I1 + S1S0′·I2 + S1S0·I3: each select combination enables one minterm, which is ANDed with its data input. Internally that is a 2-to-4 decoder on the select lines, four AND gates and an OR gate. An N-to-1 mux needs ⌈log₂ N⌉ select bits.</p>
+<h4>Mux trees</h4>
+<p>Large muxes are built as trees of small ones. In a tree of 2-to-1 muxes, all muxes in one stage share a select bit. With the least significant select bit on the first stage, the data inputs appear in natural order.</p>
+<diagram name="mux4_tree">A 4-to-1 mux from three 2-to-1 muxes. S0 picks within each pair (I0/I1 and I2/I3), S1 picks between the pairs. An N-to-1 tree needs N − 1 two-input muxes.</diagram>
+<p>The stages can use the select bits in any order, but the data inputs must then be relabeled. If S1 controls the first stage instead, the first-stage muxes must pair inputs that differ only in S1: (I0, I2) and (I1, I3). For an 8-to-1 tree with S2 on the first stage, the first stage takes the pairs (I0, I4), (I2, I6), (I1, I5), (I3, I7). A useful check: inputs paired by a mux must have select codes that differ only in that mux's select bit.</p>
+<p>Wide muxes repeat the 1-bit design: choosing between two 32-bit buses takes thirty-two 2-to-1 muxes sharing one select line, and its delay is that of a single mux. Building a 16-to-1 mux can use five 4-to-1 muxes in two stages, or one 8-to-1 and two 2-to-1 stages; the choice depends on which sizes the technology offers and on delay.</p>
+<h4>A mux implements any function</h4>
+<p>Connect the function's inputs to the select lines and put the truth table's output column on the data inputs as constants: a 2ⁿ-to-1 mux is then a <b>lookup table</b> (LUT) for any n-input function. This is exactly how FPGAs implement logic (<ref to="memory"/>).</p>
+<p>A smaller mux suffices with one variable left over. <b>Shannon's expansion</b> splits any function on one variable: F = S′·F(S = 0) + S·F(S = 1), which is a 2-to-1 mux whose data inputs are the two cofactors. Applied to n − 1 variables, a 2<sup>n−1</sup>-to-1 mux implements any n-variable function if each data input may be 0, 1, the remaining variable or its complement.</p>
+<ex title="F(A, B, C) = Σm(1, 2, 6, 7) on a 4-to-1 mux">
+<p>Put A on S1 and B on S0. For each AB combination, look at the two rows (C = 0 and C = 1) and express F as a function of C:</p>
+<grid cls="mono">A B | rows | F for C = 0, 1 | data input
+0 0 | 0, 1 | 0, 1 | I0 = C
+0 1 | 2, 3 | 1, 0 | I1 = C′
+1 0 | 4, 5 | 0, 0 | I2 = 0
+1 1 | 6, 7 | 1, 1 | I3 = 1</grid>
+<p>One 4-to-1 mux and an inverter replace a two-level circuit. With only a 2-to-1 mux and A on its select line, the same procedure needs F(A = 0) = B ⊕ C and F(A = 1) = B as data inputs.</p>
+</ex>
+<p>Since a 2-to-1 mux with constants available can produce NOT (I0 = 1, I1 = 0), AND (S = A, I0 = 0, I1 = B) and OR (S = A, I0 = B, I1 = 1), the 2-to-1 mux is functionally complete on its own.</p>
+<h4>Demultiplexers</h4>
+<p>A <b>demultiplexer</b> routes one data input to one of 2ⁿ outputs selected by n bits, with all other outputs 0. It is the same circuit as a decoder with its enable used as the data input.</p>
+
+<h3>Tri-state buffers and shared buses</h3>
+<p>Muxes combine signals with logic. The alternative for a shared wire is to let several drivers connect to it directly, with only one allowed to drive at a time. A <b>tri-state buffer</b> has a data input, an enable, and an output that is either the data value (enabled) or <b>Z</b>, high impedance (disabled), meaning the output transistors are both off and the buffer is effectively disconnected.</p>
+<diagram name="tristate_bus">A decoder on the enable lines guarantees that exactly one driver is active, so the bus always has one source and never two.</diagram>
+<warn>
+<p><b>Bus contention</b> occurs when two enabled drivers try to drive the same wire to different values. The two output stages form a low-resistance path from supply to ground: two drivers with 25 Ω output resistance on a 3.3 V bus pass about 3.3 / 50 = 66 mA, enough to overheat or damage them, and the bus sits at an undefined middle voltage. The opposite fault, no driver enabled, leaves the bus <b>floating</b>; buses that can be idle need a pull-up or pull-down resistor or a "bus keeper" to hold a valid level.</p>
+</warn>
+<p>Inside chips, tri-state buses have largely been replaced by multiplexers, which have no contention risk and are easier for timing tools to analyze. Tri-state outputs remain essential on chip pins (bidirectional data pins, memory buses) and in the form of <b>open-drain</b> outputs used by I²C and interrupt lines (<ref to="interfacing"/>).</p>
+<prac>
+<p>In Verilog, a mux is a conditional expression <code>assign y = s ? b : a;</code> or a <code>case</code> statement, and a tri-state driver is <code>assign pin = en ? data : 1'bz;</code>. Synthesis tools map wide case statements to mux trees or to AND-OR logic, whichever is smaller or faster (<ref to="verilog"/>).</p>
+</prac>
+
+<h3>Summary</h3>
+<ul>
+<li>A decoder outputs all minterms of its inputs; with OR gates it builds any function. Trees of small decoders build large ones through their enables.</li>
+<li>A priority encoder reports the highest-priority active input plus a valid bit.</li>
+<li>An N-to-1 mux needs ⌈log₂ N⌉ select bits; a tree of 2-to-1 muxes needs N − 1 of them.</li>
+<li>A 2ⁿ-to-1 mux is a lookup table for any n-variable function; with residues, a 2<sup>n−1</sup>-to-1 mux suffices.</li>
+<li>Tri-state outputs allow shared wires; exactly one driver must be enabled at a time.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>How many outputs does a 5-to-32 decoder have, and how many are active at once (when enabled)? How many select lines does a 32-to-1 mux need?</p></ask>
+<sol><p>32 outputs, exactly <b>one</b> active. A 32-to-1 mux needs log₂ 32 = <b>5</b> select lines.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>A 3-to-8 decoder with active-high outputs and an active-high enable receives A2A1A0 = 110 and EN = 1. Which output is active? What if EN = 0?</p></ask>
+<sol><p>110 = 6, so <b>Y6 = 1</b> and all others 0. With EN = 0, <b>all outputs are 0</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Write the equation of a 2-to-1 mux and use it to explain why a mux with S = A, I0 = 0, I1 = B computes A·B.</p></ask>
+<sol><p>Y = S′·I0 + S·I1. Substituting: Y = A′·0 + A·B = <b>A·B</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Implement a full adder with a 3-to-8 decoder (active-high outputs) and OR gates. Then redo it for a decoder with active-low outputs.</p></ask>
+<sol><p>Active high: <b>S = Y1 + Y2 + Y4 + Y7</b>, <b>C<sub>out</sub> = Y3 + Y5 + Y6 + Y7</b>. Active low (outputs Y<sub>i</sub>′): use NAND gates: S = NAND(Y1′, Y2′, Y4′, Y7′) and C<sub>out</sub> = NAND(Y3′, Y5′, Y6′, Y7′), since (a′·b′·c′·d′)′ = a + b + c + d.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>How many 2-to-4 decoders are needed to build a 4-to-16 decoder as a tree, and how are they connected?</p></ask>
+<sol><p><b>Five</b>: one first-level decoder on A3A2 whose four outputs drive the enables of four second-level decoders, each decoding A1A0 into four of the sixteen outputs. The first-level decoder's own enable is the overall enable.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A priority encoder has inputs I3 (highest priority) to I0 and outputs Y1Y0 and V. What are the outputs for I3I2I1I0 = 0110, 0001 and 0000?</p></ask>
+<sol><p>0110: highest active is I2 → <b>Y = 10, V = 1</b>. 0001: only I0 → <b>Y = 00, V = 1</b>. 0000: none → <b>Y = 00 (don't care), V = 0</b>. The valid bit is what distinguishes the last two cases.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Build a 3-to-1 mux (select 00 → I0, 01 → I1, 1X → I2) from 2-to-1 muxes.</p></ask>
+<sol><p>Two 2-to-1 muxes: the first, with select S0, chooses between I0 and I1; the second, with select S1, chooses between the first mux's output (S1 = 0) and I2 (S1 = 1). When S1 = 1, S0 is ignored, which matches the 1X code.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A 4-to-1 tree of 2-to-1 muxes must use S1 on its first stage and S0 on its second. Which data inputs go into each first-stage mux?</p></ask>
+<sol><p>First-stage muxes pair inputs whose codes differ only in S1: <b>(I0, I2)</b> with select S1, and <b>(I1, I3)</b> with select S1. The second stage chooses between those results with S0: S0 = 0 picks the (I0, I2) mux, S0 = 1 picks the (I1, I3) mux.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Implement F(A, B, C, D) = Σm(0, 3, 5, 6, 9, 10, 12, 15) with an 8-to-1 mux using A, B, C as the select lines.</p></ask>
+<hint><p>For each ABC combination, compare F in the D = 0 and D = 1 rows.</p></hint>
+<sol><p>Rows in pairs (D = 0, 1): ABC = 000 → m0, m1 = 1, 0 → <b>D′</b>; 001 → m2, m3 = 0, 1 → <b>D</b>; 010 → m4, m5 = 0, 1 → <b>D</b>; 011 → m6, m7 = 1, 0 → <b>D′</b>; 100 → m8, m9 = 0, 1 → <b>D</b>; 101 → m10, m11 = 1, 0 → <b>D′</b>; 110 → m12, m13 = 1, 0 → <b>D′</b>; 111 → m14, m15 = 0, 1 → <b>D</b>. (F is the 4-input even parity function, which is why every residue is D or D′.)</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Implement F(A, B, C) = A·B + B′·C with a single 2-to-1 mux, using B as the select line and any of 0, 1, A, A′, C, C′ as data inputs.</p></ask>
+<sol><p>Shannon expansion on B: F(B = 0) = C and F(B = 1) = A. So <b>S = B, I0 = C, I1 = A</b>: Y = B′·C + B·A, exactly F. A single mux replaces two ANDs, an OR and an inverter.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Show that a 2-to-1 mux is functionally complete by building NOT, AND and OR from it, given constants 0 and 1.</p></ask>
+<sol><p>NOT A: S = A, I0 = 1, I1 = 0 (Y = A′). AND: S = A, I0 = 0, I1 = B (Y = AB). OR: S = A, I0 = B, I1 = 1 (Y = A′B + A = A + B). Since {AND, OR, NOT} is complete, so is the 2-to-1 mux.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 6-to-1 multiplexer must select by S2S1S0 as follows: I0 for 000, I1 for 001, I2 for 01X, I3 for 10X, I4 for 110 and I5 for 111. Build it from 2-to-1 muxes with the fewest muxes possible.</p></ask>
+<sol><p>Six inputs need at least 5 two-input muxes (each mux reduces the number of candidates by one). A 5-mux solution splitting on S2 last: for S2 = 0, mux A (select S0) picks I0/I1, then mux B (select S1) picks A's output (S1 = 0) or I2 (S1 = 1). For S2 = 1, mux C (select S0) picks I4/I5, then mux D (select S1) picks I3 (S1 = 0) or C's output (S1 = 1). Mux E (select S2) picks B (0) or D (1). <b>5 muxes</b>. The X codes are what let I2 and I3 skip the S0 stage.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Four devices share an 8-bit tri-state bus. Each device's output enable comes from a 2-to-4 decoder driven by a 2-bit "owner" register. What goes wrong if the decoder's enable input is wired permanently active, and what goes wrong if the owner register is not reset at power-up?</p></ask>
+<sol><p>With the decoder always enabled, <b>some device always drives the bus</b>, which is fine for contention (exactly one) but means the bus can never be released, for example to let an external tester or a bidirectional device drive it. If the owner register is not reset, it powers up with a random value, so a random device drives the bus at startup; that is safe electrically, because the decoder still guarantees only one enable, but it may drive garbage to the others until software sets the register. The dangerous case would be enables generated by independent logic instead of a decoder, where two could be active at once.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Design a 16-to-1 multiplexer in three ways: from 2-to-1 muxes, from 4-to-1 muxes, and from one 8-to-1 plus 2-to-1 muxes. Give the mux count and the number of mux levels (delay) for each.</p></ask>
+<sol><p><b>2-to-1 only:</b> a binary tree of 8 + 4 + 2 + 1 = <b>15 muxes, 4 levels</b>. <b>4-to-1 only:</b> four on the first stage (selects S1S0) and one on the second (S3S2): <b>5 muxes, 2 levels</b>. <b>8-to-1 plus 2-to-1:</b> two 8-to-1 muxes on S2S1S0 and one 2-to-1 on S3: <b>3 muxes, 2 levels</b> (or, with a single 8-to-1, eight 2-to-1 muxes in front of it on S0 and the 8-to-1 on S3S2S1: 9 muxes, 2 levels). Delay depends on each mux's internal delay, which grows with its size, so fewer levels of larger muxes is not automatically faster.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>An 8-to-3 priority encoder (I7 highest) is often built from two 4-to-2 priority encoders. Describe the structure and give the equations that combine them.</p></ask>
+<sol><p>Encoder H handles I7–I4 and outputs h1h0 and valid Vh; encoder L handles I3–I0 and outputs l1l0 and VL. If any upper input is active, the upper encoder wins: <b>Y2 = Vh</b>; <b>Y1 = Vh ? h1 : l1</b>; <b>Y0 = Vh ? h0 : l0</b> (two 2-to-1 muxes with select Vh); <b>V = Vh + VL</b>. This scales recursively, which is how wide leading-one detectors are built with logarithmic delay.</p></sol>
+</prob>
+</practice>
+</module>

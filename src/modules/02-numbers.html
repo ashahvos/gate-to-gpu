@@ -1,0 +1,205 @@
+<module id="numbers" num="2" part="1" title="Number systems and codes" short="Number systems" pre="digital" blurb="Positional notation in any base, exact conversion methods for integers and fractions, hex and octal shorthand, how many bits a quantity needs, and the codes hardware uses besides plain binary: BCD, ASCII, Gray, one-hot and parity.">
+
+<p>A group of bits has no meaning by itself. The pattern 01000001 is the number 65 to an adder, the letter A to a terminal, the two decimal digits 41 to a BCD display driver, and a set of eight independent on/off flags to a peripheral register. This module covers the most important way of giving bits meaning, positional binary numbers, and the conversions between binary, decimal, octal and hexadecimal that every hardware engineer does constantly. It then covers the other codes digital systems use and why each exists.</p>
+
+<h3>Bits plus context</h3>
+<diagram name="bits_context">One stored pattern, five interpretations. Nothing in the byte records which reading is intended; the meaning comes from the instruction, program or circuit that uses it.</diagram>
+<key>
+<p>Information = bits + context. Hardware stores and moves patterns; the <i>interpretation</i> of a pattern is a convention shared by whoever writes it and whoever reads it. The same adder adds unsigned and signed numbers, and the same memory stores text and machine instructions. Most bugs at the hardware–software boundary are two parties disagreeing about context: signed versus unsigned, byte order, or units.</p>
+</key>
+
+<h3>Positional number systems</h3>
+<p>In a positional system with <b>radix</b> (base) r, each digit position has a weight that is a power of r, and a number's value is the sum of each digit times its weight. Digits range from 0 to r − 1. Positions to the left of the radix point have weights r⁰, r¹, r², …; positions to the right have weights r⁻¹, r⁻², ….</p>
+<eq>value = d<sub>n−1</sub>·r<sup>n−1</sup> + … + d<sub>1</sub>·r<sup>1</sup> + d<sub>0</sub>·r<sup>0</sup> + d<sub>−1</sub>·r<sup>−1</sup> + d<sub>−2</sub>·r<sup>−2</sup> + …</eq>
+<grid>System | Radix | Digits | Written in this guide | In C, C++ and Verilog
+Binary | 2 | 0, 1 | 1011₂ or 0b1011 | 0b1011 (C23, C++14, GCC), 4'b1011 (Verilog)
+Octal | 8 | 0 to 7 | 615₈ | 0615 (a leading zero), 9'o615
+Decimal | 10 | 0 to 9 | 397 | 397, 10'd397
+Hexadecimal | 16 | 0 to 9, A to F | 0x18D or 18D₁₆ | 0x18D, 12'h18D</grid>
+<p>Hexadecimal needs sixteen digit symbols, so A through F stand for 10 through 15. Each binary position doubles in weight moving left (1, 2, 4, 8, 16, …) and halves moving right (1/2, 1/4, 1/8, …).</p>
+<warn>
+<p>In C and C++, an integer literal that starts with 0 is octal. <code>int x = 010;</code> sets x to 8, and <code>int y = 09;</code> does not compile because 9 is not an octal digit. Never pad decimal constants with leading zeros in C.</p>
+</warn>
+
+<h3>Converting to decimal</h3>
+<p>Multiply each digit by its weight and add. This works for any base and for fractional parts.</p>
+<ex title="Binary, octal and hex to decimal">
+<p><span class="m">1110.01₂</span> = 8 + 4 + 2 + 0 + 0·½ + 1·¼ = <b>14.25</b>.</p>
+<p><span class="m">615₈</span> = 6·64 + 1·8 + 5·1 = 384 + 8 + 5 = <b>397</b>.</p>
+<p><span class="m">0x2C</span> = 2·16 + 12·1 = <b>44</b>. <span class="m">0x1F4</span> = 1·256 + 15·16 + 4 = 256 + 240 + 4 = <b>500</b>.</p>
+</ex>
+<p>For binary, it is faster to add only the weights of the 1 bits. With practice you read 8-bit patterns directly: <span class="m">1100 1000</span> is 128 + 64 + 8 = 200.</p>
+
+<h3>Converting from decimal</h3>
+<h4>Integer part: repeated division (or subtracting powers)</h4>
+<p>Divide by the target radix repeatedly. Each remainder is the next digit, starting with the least significant, and you stop when the quotient reaches 0. Reading the remainders from last to first gives the number.</p>
+<ex title="397 to base 8 and 156 to binary">
+<p>397 ÷ 8 = 49 remainder <b>5</b>; 49 ÷ 8 = 6 remainder <b>1</b>; 6 ÷ 8 = 0 remainder <b>6</b>. Reading upward: <b>615₈</b>.</p>
+<p>156 ÷ 2 = 78 r <b>0</b>, 78 ÷ 2 = 39 r <b>0</b>, 39 ÷ 2 = 19 r <b>1</b>, 19 ÷ 2 = 9 r <b>1</b>, 9 ÷ 2 = 4 r <b>1</b>, 4 ÷ 2 = 2 r <b>0</b>, 2 ÷ 2 = 1 r <b>0</b>, 1 ÷ 2 = 0 r <b>1</b>. Reading upward: <b>1001 1100₂</b> = 0x9C.</p>
+</ex>
+<p>For binary there is an equivalent method that many people find faster, sometimes called "making change": subtract the largest power of two that fits, write a 1 in that position, and repeat with the remainder. 156 = 128 + 28 = 128 + 16 + 12 = 128 + 16 + 8 + 4, so bits 7, 4, 3 and 2 are 1: 1001 1100. The division method is the one that works for any radix.</p>
+<h4>Fractional part: repeated multiplication</h4>
+<p>Multiply the fraction by the radix. The integer part of the product is the next digit (most significant first); keep the fractional part and repeat. Stop when the fraction becomes 0 or you have enough digits.</p>
+<ex title="4.375 and 0.1 to binary">
+<p>Integer part: 4 = 100₂. Fraction 0.375: 0.375 × 2 = <b>0</b>.75; 0.75 × 2 = <b>1</b>.5; 0.5 × 2 = <b>1</b>.0, done. Reading downward: .011, so 4.375 = <b>100.011₂</b>. Check: 4 + ¼ + ⅛ = 4.375.</p>
+<p>0.1: 0.2 → <b>0</b>, 0.4 → <b>0</b>, 0.8 → <b>0</b>, 1.6 → <b>1</b>, 1.2 → <b>1</b>, 0.4 → <b>0</b>, 0.8 → <b>0</b>, 1.6 → <b>1</b>, 1.2 → <b>1</b>, … The pattern 0011 repeats forever: 0.1₁₀ = <b>0.0 0011 0011 0011…₂</b>.</p>
+</ex>
+<key>
+<p>A fraction has a finite binary expansion only if its denominator, in lowest terms, is a power of two. 0.375 = 3/8 terminates; 0.1 = 1/10 does not, because 10 has a factor of 5. That is why 0.1 cannot be stored exactly in any binary floating-point format (<ref to="float"/>).</p>
+</key>
+
+<h3>Hexadecimal and octal: shorthand for binary</h3>
+<p>Because 16 = 2⁴ and 8 = 2³, each hex digit corresponds to exactly 4 bits and each octal digit to exactly 3 bits. Conversion is therefore a matter of grouping, with no arithmetic. Group <b>outward from the radix point</b>: to the left for the integer part and to the right for the fraction, padding the outermost groups with zeros.</p>
+<grid cls="tt">Hex | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | A | B | C | D | E | F
+Binary | 0000 | 0001 | 0010 | 0011 | 0100 | 0101 | 0110 | 0111 | 1000 | 1001 | 1010 | 1011 | 1100 | 1101 | 1110 | 1111</grid>
+<ex title="One number in three bases">
+<p><span class="m">101001110.11₂</span>.</p>
+<p><b>Hex</b>, groups of 4 from the point: integer 1 0100 1110 → <span class="m">0001 0100 1110</span> = 1 4 E; fraction .11 → <span class="m">.1100</span> = .C. Result: <b>14E.C₁₆</b>.</p>
+<p><b>Octal</b>, groups of 3: integer 101 001 110 = 5 1 6; fraction .110 = .6. Result: <b>516.6₈</b>.</p>
+<p>Check in decimal: 0x14E = 256 + 64 + 14 = 334 and 0.C₁₆ = 12/16 = 0.75, so 334.75; 516₈ = 320 + 8 + 6 = 334 and 0.6₈ = 6/8 = 0.75. All three agree.</p>
+</ex>
+<p>To convert between octal and hex, go through binary: 615₈ → <span class="m">110 001 101</span> → regroup by 4 from the right → <span class="m">1 1000 1101</span> → <b>0x18D</b>.</p>
+<warn>
+<p>Grouping from the wrong end. In 1 0100 1110 the lone 1 on the left is the most significant group; grouping from the left instead (1010 0111 0) shifts every bit and gives a wrong value. Always start at the radix point.</p>
+</warn>
+<tool name="numconv"/>
+
+<h3>Powers of two and estimation</h3>
+<grid cls="mono">n | 2ⁿ | name
+8 | 256 | values in a byte
+10 | 1,024 | Ki (about a thousand)
+12 | 4,096 | a common page size in bytes
+16 | 65,536 | values in 16 bits
+20 | 1,048,576 | Mi (about a million)
+24 | 16,777,216 | colors in 24-bit RGB
+30 | 1,073,741,824 | Gi (about a billion)
+32 | 4,294,967,296 | values in 32 bits
+64 | 1.8 × 10¹⁹ | values in 64 bits</grid>
+<p>The approximation 2¹⁰ ≈ 10³ makes mental estimates easy: split the exponent into tens and a remainder. 2³⁷ = 2⁷ × 2³⁰ ≈ 128 × 10⁹, so a 37-bit address reaches about 128 billion bytes (exactly 128 GiB). In the other direction, log₂(10⁶) ≈ 20 and log₂(10⁹) ≈ 30.</p>
+
+<h3>How many values, how many bits</h3>
+<p>With n digits in radix r there are rⁿ distinct combinations: 3 hex digits give 16³ = 4096 combinations and 4 decimal digits give 10⁴ = 10,000. For binary, n bits give 2ⁿ combinations, so an unsigned n-bit number ranges from 0 to 2ⁿ − 1.</p>
+<ex title="Minimum number of bits">
+<p>A sensor reports one of 384 distinct values. 2⁸ = 256 is too few and 2⁹ = 512 is enough, so it needs <b>9 bits</b>. Note that the answer depends on the number of distinct values, not on the largest value: if the readings were the 384 even numbers from 0 to 766, they would still need only 9 bits with the right encoding (store the reading divided by 2).</p>
+</ex>
+
+<h3>Other codes</h3>
+<h4>Binary-coded decimal (BCD)</h4>
+<p>BCD stores each decimal digit in its own 4-bit group, using only the patterns 0000 to 1001. 439 in BCD is <span class="m">0100 0011 1001</span>, while 439 in binary is <span class="m">1 1011 0111</span>. BCD uses more bits (12 instead of 9 here) and needs special arithmetic: when a digit sum exceeds 9, the adder adds 6 to skip the six unused patterns. Its advantage is that each digit can drive a display or be printed without division. Clocks, calculators, real-time-clock chips and some financial software use it.</p>
+<h4>ASCII and Unicode</h4>
+<p><b>ASCII</b> assigns 7-bit codes (stored in a byte) to 128 characters: control codes, digits, upper and lower case letters and punctuation. The layout is designed so that common operations are cheap:</p>
+<grid cls="mono">Character | Hex | Decimal | Note
+'\0' (NUL) | 0x00 | 0 | terminates C strings
+'\n' (LF) | 0x0A | 10 | line feed
+'\r' (CR) | 0x0D | 13 | carriage return
+' ' (space) | 0x20 | 32 | first printable character
+'0' … '9' | 0x30 … 0x39 | 48 … 57 | digit value = code − 0x30
+'A' … 'Z' | 0x41 … 0x5A | 65 … 90 |
+'a' … 'z' | 0x61 … 0x7A | 97 … 122 | differs from upper case only in bit 5 (0x20)</grid>
+<p>Converting a digit character to its value is <code>c - '0'</code>; the reverse is <code>v + '0'</code>. Upper and lower case differ in bit 5 only, so <code>c | 0x20</code> lowercases a letter, <code>c &amp; ~0x20</code> uppercases it, and <code>c ^ 0x20</code> toggles case. A character in C is just a small integer: <code>'H' + 1 == 'I'</code>, and <code>char c = 72;</code> stores the letter H. These facts matter whenever you print numbers to a display that only accepts characters (<ref to="devices"/>).</p>
+<p><b>Unicode</b> extends the idea to more than a million code points covering every writing system. Its usual encoding, <b>UTF-8</b>, uses 1 to 4 bytes per character and is backward compatible with ASCII: every ASCII byte means the same thing in UTF-8.</p>
+<h4>Gray code</h4>
+<p>In a <b>Gray code</b>, consecutive values differ in exactly one bit. The standard (reflected) Gray code is built by taking the n−1-bit sequence, writing it forward with a 0 prefix, then backward with a 1 prefix. For 3 bits: 000, 001, 011, 010, 110, 111, 101, 100.</p>
+<grid cls="tt">Decimal | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+Binary | 000 | 001 | 010 | 011 | 100 | 101 | 110 | 111
+Gray | 000 | 001 | 011 | 010 | 110 | 111 | 101 | 100</grid>
+<p>Conversion: binary to Gray is <code>g = b ^ (b &gt;&gt; 1)</code> (each Gray bit is the XOR of two adjacent binary bits). Gray to binary goes from the MSB down: the binary MSB equals the Gray MSB, and each next binary bit is the previous binary bit XOR the current Gray bit. Gray codes are used where a value is read while it changes, so that a reading taken mid-transition is wrong by at most one step: rotary and shaft encoders, counters passed between clock domains (<ref to="timing"/>), and the row and column labels of Karnaugh maps (<ref to="kmaps"/>).</p>
+<h4>One-hot and thermometer codes</h4>
+<p>A <b>one-hot</b> code uses n bits for n values, with exactly one bit set: 0001, 0010, 0100, 1000. It wastes bits but makes decoding trivial (each bit is its own "is it value k?" signal), which is why decoder outputs and fast state machines use it (<ref to="fsm"/>). A <b>thermometer</b> code sets the lowest k bits to represent k (0000, 0001, 0011, 0111, 1111) and appears in flash ADCs.</p>
+<h4>Parity</h4>
+<p>A <b>parity bit</b> is one extra bit chosen so that the total number of 1s is even (even parity) or odd (odd parity). For even parity the parity bit is the XOR of all data bits. If any single bit flips in storage or transmission, the count changes from even to odd and the receiver detects the error, though it cannot tell which bit flipped. More generally, a code whose valid words all differ in at least d bit positions (its minimum <b>Hamming distance</b>) can detect d − 1 errors and correct ⌊(d − 1)/2⌋. Parity has distance 2; the ECC used in server memory has distance 4 (correct 1, detect 2).</p>
+
+<h3>Integers in C and C++</h3>
+<p>Hardware fixes the width of every register, and C code that touches hardware should say exactly how wide each variable is. The plain types do not: <code>int</code> is 16 bits on an 8-bit AVR microcontroller and 32 bits on a desktop, and whether <code>char</code> is signed depends on the compiler. The fixed-width types from <code>&lt;stdint.h&gt;</code> (<code>&lt;cstdint&gt;</code> in C++) remove the ambiguity:</p>
+<grid cls="mono">Type | Width | Range
+uint8_t | 8 | 0 to 255
+int8_t | 8 | −128 to 127
+uint16_t | 16 | 0 to 65,535
+int16_t | 16 | −32,768 to 32,767
+uint32_t | 32 | 0 to 4,294,967,295
+int32_t | 32 | −2,147,483,648 to 2,147,483,647</grid>
+<pre lang="c">uint8_t  reg  = 0x41;        // exactly 8 bits: fits an 8-bit peripheral register
+char     c    = reg;         // the same bits, now read as the character 'A'
+uint16_t big  = 0x18D;       // 397
+uint32_t mask = 1u << 31;    // 'u' makes the constant unsigned so bit 31 is well defined</pre>
+<prac>
+<p>Datasheets give register addresses and bit masks in hex, and debuggers display memory in hex, because each hex digit maps to 4 bits you can read off directly. Fluency in hex ↔ binary is the single most used skill in embedded and hardware debugging; aim to convert any byte in your head.</p>
+</prac>
+
+<h3>Summary</h3>
+<ul>
+<li>Value = Σ digit × radix<sup>position</sup>, with negative positions after the radix point.</li>
+<li>Decimal to radix r: divide repeatedly for the integer part (remainders, least significant first) and multiply repeatedly for the fraction (integer parts, most significant first).</li>
+<li>Hex = 4 bits per digit, octal = 3; group outward from the radix point.</li>
+<li>n digits of radix r give rⁿ combinations; N values need ⌈log₂ N⌉ bits.</li>
+<li>BCD, ASCII, Gray, one-hot and parity each trade bits for a property: easy display, text, single-bit changes, trivial decoding, error detection.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>Convert <span class="m">1011 0110₂</span> to decimal and to hex.</p></ask>
+<sol><p>128 + 32 + 16 + 4 + 2 = <b>182</b>. Groups: 1011 = B, 0110 = 6, so <b>0xB6</b>. Check: 11 × 16 + 6 = 182.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>What decimal value does each represent: 0xFF, 0x100, 777₈?</p></ask>
+<sol><p>0xFF = 15 × 16 + 15 = <b>255</b>. 0x100 = 16² = <b>256</b>. 777₈ = 7 × 64 + 7 × 8 + 7 = <b>511</b> (= 2⁹ − 1, nine 1 bits).</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>How many distinct values can 3 hexadecimal digits represent? How many bits is that?</p></ask>
+<sol><p>16³ = <b>4096</b> values, the same as <b>12 bits</b> (each hex digit is 4 bits).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert 397 to binary, then to octal and hex by grouping.</p></ask>
+<sol><p>397 = 256 + 128 + 8 + 4 + 1 = <span class="m">1 1000 1101₂</span>. Octal: 110 001 101 = <b>615₈</b>. Hex: 1 1000 1101 = <b>0x18D</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert 615₈ directly to hexadecimal without going through decimal.</p></ask>
+<hint><p>Expand each octal digit into 3 bits, then regroup by 4 starting from the right.</p></hint>
+<sol><p>6 1 5 → 110 001 101 → regroup: 1 1000 1101 → <b>0x18D</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert 13.625 to binary.</p></ask>
+<sol><p>13 = 1101. Fraction: 0.625 × 2 = 1.25 → 1; 0.25 × 2 = 0.5 → 0; 0.5 × 2 = 1.0 → 1. So 13.625 = <b>1101.101₂</b>. Check: 8 + 4 + 1 + ½ + ⅛ = 13.625.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert <span class="m">110101.0111₂</span> to hex and octal.</p></ask>
+<sol><p>Hex: 0011 0101 . 0111 → <b>35.7₁₆</b>. Octal: 110 101 . 011 100 → <b>65.34₈</b>. Both equal 53.4375 in decimal.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Encode 2025 in BCD and in binary. How many bits does each need?</p></ask>
+<sol><p>BCD: 0010 0000 0010 0101 (<b>16 bits</b>). Binary: 2025 = 1024 + 512 + 256 + 128 + 64 + 32 + 8 + 1 = <span class="m">111 1110 1001</span> (<b>11 bits</b>, 0x7E9).</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>In C, a variable <code>char d</code> holds one of the characters '0' to '9'. Write an expression for its numeric value. Then write an expression that turns an int <code>v</code> between 0 and 9 into its digit character.</p></ask>
+<sol><p><code>d - '0'</code> and <code>v + '0'</code>. The digits are consecutive codes 0x30 to 0x39, so subtracting or adding 0x30 converts between character and value.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert the binary value 0110 to Gray code, and the Gray code 1011 back to binary.</p></ask>
+<sol><p>Binary → Gray: g = b ⊕ (b ≫ 1) = 0110 ⊕ 0011 = <b>0101</b>. Gray → binary from the MSB: b₃ = 1; b₂ = b₃ ⊕ g₂ = 1 ⊕ 0 = 1; b₁ = b₂ ⊕ g₁ = 1 ⊕ 1 = 0; b₀ = b₁ ⊕ g₀ = 0 ⊕ 1 = 1. Result <b>1101</b> (13). Check: 1101 ⊕ 0110 = 1011.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A data logger must record any one of 384 distinct sensor states. What is the minimum number of bits per record? If it stores 10,000 records per second, how many bytes per hour does it need if each record is padded to a whole number of bytes?</p></ask>
+<sol><p>2⁸ = 256 &lt; 384 ≤ 512 = 2⁹, so <b>9 bits</b>. Padded to 2 bytes per record: 10,000 × 3600 × 2 = <b>72,000,000 bytes</b> (72 MB, about 68.7 MiB) per hour. Packing records at 9 bits each would need 40.5 MB, which is why loggers sometimes pack bits.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Without a calculator, estimate how many address bits a byte-addressed memory of 48 GiB needs, and what a 40-bit address can reach.</p></ask>
+<sol><p>48 GiB = 48 × 2³⁰ bytes. 32 &lt; 48 ≤ 64, so it needs 2⁶ × 2³⁰ = 2³⁶ addresses: <b>36 bits</b> (35 bits only reach 32 GiB). 2⁴⁰ = 2¹⁰ × 2³⁰ = 1024 GiB = <b>1 TiB</b>.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Write C expressions that (a) uppercase a lowercase ASCII letter <code>c</code>, (b) test whether <code>c</code> is a decimal digit, (c) convert a hex digit character ('0'–'9', 'a'–'f') to its value.</p></ask>
+<sol><p>(a) <code>c &amp; ~0x20</code> (equivalently <code>c - 32</code>). (b) <code>c &gt;= '0' &amp;&amp; c &lt;= '9'</code>. (c) <code>(c &lt;= '9') ? c - '0' : c - 'a' + 10</code>. For mixed case, lowercase first with <code>c | 0x20</code>, which leaves digits unchanged because digits already have bit 5 set (0x30 to 0x39).</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Compute the even parity bit for the byte 0x5B. A receiver gets 0x5B with parity bit 0. Is an error detected? Can a parity check detect two flipped bits?</p></ask>
+<sol><p>0x5B = 0101 1011 has five 1 bits, so the even-parity bit is <b>1</b> (making six). Receiving parity 0 with that data gives an odd total, so an <b>error is detected</b> (either a data bit or the parity bit itself flipped). Two flipped bits change the count by an even number, so parity <b>cannot detect</b> them.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A colleague writes <code>uint16_t limits[] = { 0100, 0250, 1000 };</code> intending one hundred, two hundred fifty and one thousand. What values does the array actually hold, and how would a code review catch this?</p></ask>
+<sol><p>Leading zeros make C octal literals: 0100₈ = <b>64</b>, 0250₈ = 2·64 + 5·8 = <b>168</b>, and 1000 is decimal <b>1000</b>. The code compiles without warnings by default. Catch it by banning leading zeros on decimal constants in the style guide (compilers and linters such as clang-tidy can flag octal literals), or by writing values in the base that matches their meaning.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>Show that a 4-bit Gray-coded counter changes exactly one bit per step, including the wrap from 15 back to 0, and explain why that property matters when another circuit samples the counter at an arbitrary moment.</p></ask>
+<sol><p>Gray(15) = 1111 ⊕ 0111 = <b>1000</b> and Gray(0) = <b>0000</b>, which differ only in the MSB; the reflected construction guarantees one-bit differences between all other neighbors too (each half is a Gray sequence, and the middle and wrap boundaries differ only in the prefix bit). If a sampler catches the counter mid-change, only one bit is uncertain, so it reads either the old value or the new value, both of which are correct to within one count. With plain binary, 0111 → 1000 changes four bits; bits that have and have not switched yet can combine into any of 16 patterns, for example 1111, which is wrong by eight counts.</p></sol>
+</prob>
+</practice>
+</module>

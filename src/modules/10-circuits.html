@@ -1,0 +1,184 @@
+<module id="circuits" num="10" part="3" title="Circuits: voltage, current and RC behavior" short="Circuits and RC" pre="digital" blurb="The circuit laws every hardware engineer uses daily: Ohm's and Kirchhoff's laws, dividers and Thevenin equivalents, capacitors and the RC time constant that sets gate delay, inductors, impedance, and first-order filters.">
+
+<p>Logic diagrams hide the electrical reality that makes them work or fail. A gate output is a transistor connecting a wire to the supply or to ground through some resistance; the wire and every gate input attached to it form a capacitance; the time to charge that capacitance is the gate's delay, and the energy spent doing so is most of the chip's power. This module builds the circuit analysis needed to reason about those effects, and about the analog parts that surround every digital system: dividers, filters, sensors and loads.</p>
+
+<h3>Charge, current, voltage and power</h3>
+<def term="Current">The rate at which charge flows past a point, I = dQ/dt, measured in amperes (1 A = 1 coulomb per second). By convention current flows from higher to lower potential through a load, opposite to the direction electrons actually move.</def>
+<def term="Voltage">The potential difference between two points: the energy per unit charge gained or lost moving between them, measured in volts (1 V = 1 joule per coulomb). A voltage is always between two nodes; "the voltage at a node" means relative to a chosen reference node called ground.</def>
+<p>Power is the rate of energy transfer, P = V·I, in watts. An element that has current entering its more positive terminal absorbs power (a resistor, a charging battery); one with current leaving its positive terminal delivers it. Energy is power integrated over time, E = P·t for constant power. Two numbers to keep in mind: a microcontroller pin at 5 V delivering 20 mA supplies 0.1 W, far too little to drive a loudspeaker or motor directly, while a modern GPU at about 1 V can draw several hundred amperes.</p>
+
+<h3>Resistance and Ohm's law</h3>
+<p>For a resistor the current is proportional to the voltage across it:</p>
+<eq c>V = I · R</eq>
+<p>Resistance is measured in ohms (Ω). Substituting Ohm's law into P = VI gives the power a resistor dissipates as heat: <b>P = I²R = V²/R</b>. Resistors have power ratings (1/8 W and 1/4 W are typical for small parts) that must exceed this. A conductor of resistivity ρ, length L and cross-sectional area A has R = ρL/A, which is why on-chip wires, with cross sections measured in tens of nanometers, have significant resistance: it grows with length and shrinks with width.</p>
+<warn><p>Ohm's law describes resistors, not every element. A diode, LED or transistor has a non-linear current-voltage relationship. Treating an LED as a resistor (or forgetting the series resistor it needs) is a classic interfacing mistake, covered in <ref to="interfacing"/>.</p></warn>
+
+<h3>Kirchhoff's laws</h3>
+<p>Two conservation laws let you analyze any circuit:</p>
+<ul>
+<li><b>Kirchhoff's current law (KCL):</b> the currents entering a node sum to zero (what flows in flows out), because charge cannot accumulate at a junction of wires.</li>
+<li><b>Kirchhoff's voltage law (KVL):</b> the voltages around any closed loop sum to zero, because returning to the starting node returns to the starting potential.</li>
+</ul>
+<p>Systematic circuit analysis (nodal analysis) assigns an unknown voltage to each node except ground, writes KCL at each node with every current expressed through Ohm's law, and solves the resulting linear equations. Most circuits in digital design are simple enough to reduce by inspection instead, using the series and parallel rules below.</p>
+
+<h3>Series and parallel resistors</h3>
+<p>Elements in <b>series</b> carry the same current, so their voltages add: R<sub>eq</sub> = R<sub>1</sub> + R<sub>2</sub> + …. Elements in <b>parallel</b> share the same voltage, so their currents add: 1/R<sub>eq</sub> = 1/R<sub>1</sub> + 1/R<sub>2</sub> + …. For two resistors, R<sub>1</sub> ∥ R<sub>2</sub> = R<sub>1</sub>R<sub>2</sub>/(R<sub>1</sub> + R<sub>2</sub>); n equal resistors in parallel give R/n; and a parallel combination is always smaller than its smallest member.</p>
+<p>To analyze a series-parallel network, collapse it step by step into one equivalent resistance, find the total current, then expand back out, applying Ohm's law to each piece.</p>
+<diagram name="series_parallel">Collapse R<sub>3</sub> + R<sub>4</sub> = 3 kΩ, then 3 kΩ ∥ 3 kΩ = 1.5 kΩ, then add R<sub>1</sub>: 2.5 kΩ. The source current is 3.6 mA; R<sub>1</sub> drops 3.6 V, leaving 5.4 V across both branches, which split the current equally.</diagram>
+
+<h3>Voltage and current dividers</h3>
+<p>Two resistors in series across a source form a <b>voltage divider</b>. The same current I = V<sub>S</sub>/(R<sub>1</sub> + R<sub>2</sub>) flows through both, so each resistor's share of the voltage is proportional to its resistance:</p>
+<eq c>V<sub>out</sub> = V<sub>S</sub> · R<sub>2</sub> / (R<sub>1</sub> + R<sub>2</sub>)</eq>
+<diagram name="divider">The divider formula assumes nothing draws current from the output. Connecting a load R<sub>L</sub> puts it in parallel with R<sub>2</sub>, which lowers the output voltage.</diagram>
+<p>The loaded case is the one that matters in practice. With V<sub>S</sub> = 10 V and R<sub>1</sub> = R<sub>2</sub> = 10 kΩ the unloaded output is 5 V; a 10 kΩ load makes the bottom half 5 kΩ, and the output falls to 10 × 5/15 = 3.33 V. A useful rule is that the load should be at least ten times R<sub>1</sub> ∥ R<sub>2</sub> (the divider's Thevenin resistance, introduced next) for the output to stay within about 10% of the formula; when that is impossible, buffer the output with an op-amp follower (<ref to="analog"/>). Dividers appear everywhere: scaling a battery voltage into an ADC's input range, biasing, potentiometers (a divider with a movable tap), and resistive sensors such as thermistors or photoresistors paired with a fixed resistor.</p>
+<p>The dual result is the <b>current divider</b>: a current I entering two parallel resistors splits in inverse proportion to resistance, I<sub>1</sub> = I · R<sub>2</sub>/(R<sub>1</sub> + R<sub>2</sub>). More current takes the easier path.</p>
+
+<h3>Thevenin equivalents: what a load sees</h3>
+<p>Any linear network of sources and resistors, viewed from two terminals, is indistinguishable from a single voltage source V<sub>TH</sub> in series with a single resistance R<sub>TH</sub>. This is the most useful idea in interfacing because it answers the question "how much will the voltage sag when I connect a load?"</p>
+<diagram name="thevenin">Thevenin's theorem. The equivalent Norton form is a current source V<sub>TH</sub>/R<sub>TH</sub> in parallel with R<sub>TH</sub>.</diagram>
+<p>To find the equivalent: V<sub>TH</sub> is the open-circuit voltage at the terminals; R<sub>TH</sub> is the resistance seen looking into the terminals with every independent voltage source replaced by a short and every current source by an open. For the divider above, V<sub>TH</sub> = V<sub>S</sub>R<sub>2</sub>/(R<sub>1</sub> + R<sub>2</sub>) and R<sub>TH</sub> = R<sub>1</sub> ∥ R<sub>2</sub>. With a load attached, V<sub>load</sub> = V<sub>TH</sub> · R<sub>L</sub>/(R<sub>TH</sub> + R<sub>L</sub>): the source resistance and the load form a divider.</p>
+<p>Every real source has a Thevenin resistance: a battery's internal resistance, a logic output's transistor on-resistance (tens of ohms), a sensor's output impedance. A digital output that reads 1.8 V instead of 5 V while driving an LED is this effect, worked through in <ref to="interfacing"/>. A related result: a load draws maximum power from a source when R<sub>L</sub> = R<sub>TH</sub>, at 50% efficiency, which matters for RF and audio matching but not for logic, where you want R<sub>L</sub> ≫ R<sub>TH</sub> so the voltage holds.</p>
+
+<h3>Capacitors</h3>
+<def term="Capacitor">Two conductors separated by an insulator. It stores charge Q = C·V on its plates; capacitance C is measured in farads. Because current is the rate of change of charge, i = C·dv/dt: a capacitor's voltage cannot change instantly, and it passes no DC current once charged.</def>
+<p>A capacitor charged to V stores energy ½CV². Capacitors combine opposite to resistors: in parallel their capacitances add (more plate area), in series 1/C<sub>eq</sub> = 1/C<sub>1</sub> + 1/C<sub>2</sub>. Typical values span many orders of magnitude: a CMOS gate input is about a femtofarad (10⁻¹⁵ F) in a modern process, a millimeter of on-chip wire a fraction of a picofarad, a ceramic decoupling capacitor 100 nF, and an electrolytic bulk capacitor hundreds of microfarads.</p>
+<p>In digital systems capacitance is both a nuisance and a tool. Every wire and gate input is a parasitic capacitor that must be charged and discharged on every transition, which costs time and energy. Deliberate capacitors placed next to each chip's supply pins (<b>decoupling</b> or <b>bypass capacitors</b>) act as local charge reservoirs: when thousands of transistors switch at once, the charge comes from the nearby capacitor rather than through the long, inductive supply path.</p>
+
+<h3>RC circuits: the time constant</h3>
+<p>Connect a source V<sub>S</sub> through a resistor R to an uncharged capacitor C at t = 0. KVL gives V<sub>S</sub> = iR + v<sub>C</sub>, and i = C·dv<sub>C</sub>/dt, so</p>
+<eq c>RC · dv<sub>C</sub>/dt + v<sub>C</sub> = V<sub>S</sub>    ⇒    v<sub>C</sub>(t) = V<sub>S</sub> (1 − e<sup>−t/RC</sup>)</eq>
+<p>The product <b>τ = RC</b> is the <b>time constant</b> (ohms × farads = seconds). The capacitor starts charging at the rate V<sub>S</sub>/τ, as if it would reach V<sub>S</sub> in one time constant, but the current falls as the capacitor voltage approaches the source, so the approach is exponential.</p>
+<diagram name="rc_step">An RC circuit charging. Discharging from V<sub>0</sub> through R follows the mirror image, v<sub>C</sub>(t) = V<sub>0</sub>e<sup>−t/RC</sup>.</diagram>
+<grid cls="mono">Elapsed time | Fraction of the final value reached | Fraction remaining
+1τ | 63.2% | 36.8%
+2τ | 86.5% | 13.5%
+3τ | 95.0% | 5.0%
+5τ | 99.3% | 0.7%</grid>
+<p>Three derived numbers are used constantly:</p>
+<ul>
+<li>The time to cross a threshold V<sub>th</sub> while charging toward V<sub>S</sub>: solve V<sub>th</sub> = V<sub>S</sub>(1 − e<sup>−t/τ</sup>) to get <b>t = τ · ln(V<sub>S</sub>/(V<sub>S</sub> − V<sub>th</sub>))</b>.</li>
+<li>The 50% point is at t = τ ln 2 ≈ <b>0.69 RC</b>, the usual estimate for a gate's propagation delay.</li>
+<li>The 10%-to-90% rise time is τ(ln 0.9 − ln 0.1) ≈ <b>2.2 RC</b>.</li>
+</ul>
+
+<h3>Why the time constant is gate delay</h3>
+<p>When a CMOS gate's output switches, one transistor connects the output wire to the supply or to ground through its on-resistance R<sub>on</sub>, and that resistance charges or discharges the total load capacitance: the input capacitance of every gate it drives (its fanout), the wire, and the gate's own output capacitance. To first order the propagation delay is therefore t<sub>pd</sub> ≈ 0.69·R<sub>on</sub>·C<sub>load</sub>. This single model explains a long list of design facts:</p>
+<ul>
+<li>Delay grows linearly with fanout, because each extra input adds capacitance.</li>
+<li>Wider transistors switch faster (lower R<sub>on</sub>) but present more input capacitance to whatever drives them, so speeding up one gate slows its predecessor.</li>
+<li>Long wires are slow. A wire's resistance and capacitance both grow with length L, so its own delay grows with L²; long on-chip wires are broken into segments with repeaters (buffers) to make the delay grow linearly instead.</li>
+<li>Every transition moves charge C·V<sub>DD</sub> through a resistance, which is where dynamic power comes from (<ref to="cmos"/>).</li>
+</ul>
+
+<h3>Inductors</h3>
+<p>An inductor stores energy in a magnetic field, ½LI², and resists changes in current: <b>v = L·di/dt</b> (L in henries). Its current cannot change instantly, the dual of a capacitor's voltage. If you try to interrupt the current abruptly, for example by switching off a transistor driving a relay coil or motor, di/dt becomes very large and so does the voltage: interrupting 100 mA in 1 μs through 10 mH produces about 1000 V, enough to destroy the transistor. The cure is a flyback diode that gives the current a path to decay through (<ref to="interfacing"/>).</p>
+<p>Inductance also appears where nobody put an inductor: every wire, package pin and bond wire has a few nanohenries. When many outputs switch at once, the supply and ground currents change quickly, and L·di/dt across the package inductance makes the chip's internal ground bounce relative to the board's ground. This is <b>ground bounce</b> (or simultaneous switching noise), and it is another reason for decoupling capacitors and many supply pins.</p>
+
+<h3>Sinusoids and impedance</h3>
+<p>Signals can be analyzed as sums of sinusoids v(t) = A·sin(2πft + φ), with frequency f in hertz, angular frequency ω = 2πf and period T = 1/f. For sinusoids, capacitors and inductors behave like frequency-dependent resistors described by an <b>impedance</b> Z, a complex number whose magnitude scales amplitude and whose angle shifts phase:</p>
+<grid>Element | Impedance | Magnitude | Behavior
+Resistor | Z = R | R | same at all frequencies
+Capacitor | Z = 1/(jωC) | 1/(2πfC) | open circuit at DC, short circuit at high frequency
+Inductor | Z = jωL | 2πfL | short circuit at DC, open circuit at high frequency</grid>
+<p>With impedances, every divider and series-parallel rule above works for sinusoids at a given frequency. That is all that is needed to analyze filters.</p>
+
+<h3>First-order RC filters</h3>
+<p>Swap one resistor of a divider for a capacitor and the divider ratio becomes frequency dependent. In the low-pass version the capacitor sits across the output; at low frequency its impedance is huge and the output follows the input, while at high frequency it shorts the output toward ground:</p>
+<eq c>H(f) = v<sub>out</sub>/v<sub>in</sub> = 1 / (1 + j·f/f<sub>c</sub>),    f<sub>c</sub> = 1/(2πRC)</eq>
+<diagram name="rc_filters">The low-pass passes frequencies below f<sub>c</sub>; the high-pass, with R and C swapped, passes frequencies above it. Both have a gain of 1/√2 at f<sub>c</sub> and change by a factor of 10 per decade of frequency far from it.</diagram>
+<p>Filter gains are usually quoted in <b>decibels</b>: for voltage ratios, gain in dB = 20·log₁₀(|v<sub>out</sub>/v<sub>in</sub>|). A ratio of 1/√2 = 0.707 is −3 dB (half the power, hence "half-power point"), 0.5 is −6 dB, 0.1 is −20 dB and 0.01 is −40 dB. A first-order filter falls by 20 dB per decade (6 dB per octave) beyond f<sub>c</sub>; cascading n sections makes an n-th order filter that falls 20n dB per decade. The phase shift of the low-pass is −45° at f<sub>c</sub>, approaching −90° far above it.</p>
+<p>The cutoff frequency and the time constant are the same fact seen in two domains: f<sub>c</sub> = 1/(2πτ). A low-pass filter is slow to respond to steps for exactly the reason it attenuates high frequencies.</p>
+<tool name="rcfilter"/>
+<prac>
+<p>Where first-order filters show up in digital systems:</p>
+<ul>
+<li><b>Anti-aliasing</b> before an ADC: remove frequencies above half the sampling rate (<ref to="analog"/>).</li>
+<li><b>PWM to analog:</b> a low-pass with f<sub>c</sub> far below the PWM frequency turns a pulse train into its average voltage.</li>
+<li><b>Debouncing:</b> an RC on a switch input smooths the bounces into one slow edge, which a Schmitt-trigger input then cleans up.</li>
+<li><b>AC coupling:</b> a series capacitor (a high-pass) removes a DC offset, as in audio inputs.</li>
+<li><b>Supply filtering:</b> a series resistor or inductor followed by a capacitor keeps digital switching noise out of an analog supply.</li>
+</ul>
+</prac>
+<deeper title="Second-order circuits and resonance">
+<p>A circuit with both an inductor and a capacitor is second order. A series RLC circuit has a resonant frequency f<sub>0</sub> = 1/(2π√(LC)), where the inductor's and capacitor's impedances cancel. Depending on the damping, set by R, its step response either approaches the final value smoothly (overdamped), as fast as possible without overshoot (critically damped), or overshoots and rings (underdamped). Ringing on a fast digital edge, caused by trace inductance and pin capacitance, is an underdamped RLC response; series termination resistors add the damping that removes it.</p>
+</deeper>
+
+<h3>Summary</h3>
+<ul>
+<li>V = IR; P = VI = I²R = V²/R. KCL: currents into a node sum to zero. KVL: voltages around a loop sum to zero.</li>
+<li>Series resistances add; parallel conductances add. Divider: V<sub>out</sub> = V<sub>S</sub>R<sub>2</sub>/(R<sub>1</sub> + R<sub>2</sub>), valid only for light loads.</li>
+<li>Any linear two-terminal network is a Thevenin source V<sub>TH</sub> with series R<sub>TH</sub>; the load and R<sub>TH</sub> form a divider.</li>
+<li>i = C dv/dt; τ = RC; 63% after 1τ, 99% after 5τ; t<sub>50%</sub> ≈ 0.69RC; t<sub>10–90%</sub> ≈ 2.2RC; t to threshold = τ ln(V<sub>S</sub>/(V<sub>S</sub> − V<sub>th</sub>)).</li>
+<li>Gate delay ≈ 0.69 R<sub>on</sub>C<sub>load</sub>; wire delay grows with length squared.</li>
+<li>v = L di/dt: interrupting inductive current creates large voltage spikes.</li>
+<li>|Z<sub>C</sub>| = 1/(2πfC); RC filter cutoff f<sub>c</sub> = 1/(2πRC), −3 dB there, −20 dB/decade beyond.</li>
+</ul>
+
+<practice>
+<prob level="intro">
+<ask><p>A 4.7 kΩ resistor has 12 V across it. Find the current and the power it dissipates.</p></ask>
+<sol><p>I = 12/4700 = <b>2.55 mA</b>. P = V²/R = 144/4700 = <b>30.6 mW</b>, well within a 1/4 W rating.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Find the equivalent resistance of (a) two 1 kΩ resistors in parallel, (b) three 3 kΩ resistors in parallel, (c) a 2 kΩ resistor in series with the combination in (b).</p></ask>
+<sol><p>(a) 1k·1k/2k = <b>500 Ω</b>. (b) 3 kΩ/3 = <b>1 kΩ</b>. (c) 2 + 1 = <b>3 kΩ</b>.</p></sol>
+</prob>
+<prob level="intro">
+<ask><p>Currents of 3 mA and 2 mA flow into a node. One wire carries 1 mA out of it. What is the current in the fourth wire, and in which direction?</p></ask>
+<sol><p>KCL: in = out, so 3 + 2 = 1 + I, <b>I = 4 mA flowing out</b> of the node.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>A divider has R<sub>1</sub> = 10 kΩ on top and R<sub>2</sub> = 20 kΩ on the bottom, fed from 5 V. Find the output voltage unloaded and with a 20 kΩ load.</p></ask>
+<sol><p>Unloaded: 5 × 20/30 = <b>3.33 V</b>. Loaded: R<sub>2</sub> ∥ R<sub>L</sub> = 10 kΩ, so 5 × 10/20 = <b>2.50 V</b>. The load equal to R<sub>2</sub> pulled the output down by 25%.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>An LED with a forward voltage of 2.0 V should carry 10 mA from a 5 V supply. What series resistor is needed, and how much power do the resistor and the LED each dissipate?</p></ask>
+<sol><p>The resistor drops 5 − 2 = 3 V at 10 mA: R = 3/0.01 = <b>300 Ω</b> (use the next standard value, 330 Ω, for slightly less current). P<sub>R</sub> = 3 V × 10 mA = <b>30 mW</b>; P<sub>LED</sub> = 2 V × 10 mA = <b>20 mW</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>R = 10 kΩ and C = 100 nF are charged from 0 V by a 5 V step. What is the time constant, and what is the capacitor voltage after 2 ms and after 5 ms?</p></ask>
+<sol><p>τ = 10⁴ × 10⁻⁷ = <b>1 ms</b>. At 2 ms: 5(1 − e⁻²) = 5 × 0.865 = <b>4.32 V</b>. At 5 ms: 5 × 0.993 = <b>4.97 V</b>.</p></sol>
+</prob>
+<prob level="easy">
+<ask><p>Convert to decibels: a voltage gain of 0.5, a voltage gain of 0.707, a voltage gain of 1000, and a power ratio of 0.5.</p></ask>
+<sol><p>20 log₁₀ 0.5 = <b>−6.02 dB</b>; 20 log₁₀ 0.707 = <b>−3.01 dB</b>; 20 log₁₀ 1000 = <b>60 dB</b>; for power use 10 log₁₀: 10 log₁₀ 0.5 = <b>−3.01 dB</b>. Halving the power and multiplying the voltage by 0.707 are the same event.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>Find the Thevenin equivalent of a divider with V<sub>S</sub> = 9 V, R<sub>1</sub> = 6 kΩ (top) and R<sub>2</sub> = 3 kΩ (bottom), then the output voltage with a 2 kΩ load.</p></ask>
+<sol><p>V<sub>TH</sub> = 9 × 3/9 = <b>3 V</b>; R<sub>TH</sub> = 6k ∥ 3k = <b>2 kΩ</b>. With R<sub>L</sub> = 2 kΩ: 3 × 2/(2 + 2) = <b>1.5 V</b>. Check directly: R<sub>2</sub> ∥ R<sub>L</sub> = 1.2 kΩ, 9 × 1.2/7.2 = 1.5 V.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 10 kΩ pull-up resistor charges a wire with 100 pF of capacitance from 0 V toward 5 V. A receiving input reads 1 once the voltage passes 3.0 V. How long after release does the input read 1?</p></ask>
+<sol><p>τ = 10⁴ × 10⁻¹⁰ = 1 μs. t = τ ln(5/(5 − 3)) = 1 μs × ln 2.5 = <b>0.92 μs</b>. This is why pull-up resistors limit the speed of open-drain buses: halve R to halve the delay, at the cost of more current when the line is low.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>An RC low-pass has R = 1.6 kΩ and C = 100 nF. Find f<sub>c</sub>, and the gain in dB at 10 kHz and at 100 kHz.</p></ask>
+<sol><p>f<sub>c</sub> = 1/(2π × 1600 × 10⁻⁷) = <b>995 Hz ≈ 1 kHz</b>. At 10 kHz, |H| = 1/√(1 + 10²) = 0.0995 → <b>−20 dB</b>. At 100 kHz, |H| ≈ 0.01 → <b>−40 dB</b>: one decade further, 20 dB lower.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A 1 μF capacitor charged to 5 V is discharged through 1 kΩ. How much energy was stored, how long until the voltage falls below 0.5 V, and where does the energy go?</p></ask>
+<sol><p>E = ½CV² = ½ × 10⁻⁶ × 25 = <b>12.5 μJ</b>. τ = 1 ms; 5e<sup>−t/τ</sup> = 0.5 → t = τ ln 10 = <b>2.3 ms</b>. All of the energy is dissipated as heat in the resistor.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A transistor switches off 100 mA flowing through a 10 mH relay coil in 1 μs. Estimate the voltage the coil produces, and explain what a flyback diode does about it.</p></ask>
+<sol><p>v = L di/dt = 0.01 × 0.1/10⁻⁶ = <b>1000 V</b>. The coil keeps its current flowing by raising the voltage at the transistor's drain until something breaks down. A diode across the coil, cathode to the supply, gives the current a loop to circulate in; the drain then rises only one diode drop above the supply while the current decays through the coil's resistance.</p></sol>
+</prob>
+<prob level="medium">
+<ask><p>A logic gate with 2 kΩ output resistance drives four gate inputs of 5 fF each and a wire of 20 fF. Estimate the propagation delay. What happens if the fanout doubles?</p></ask>
+<sol><p>C<sub>load</sub> = 4 × 5 + 20 = 40 fF. t<sub>pd</sub> ≈ 0.69 × 2000 × 40 × 10⁻¹⁵ = <b>55 ps</b>. With eight inputs C<sub>load</sub> = 60 fF and t<sub>pd</sub> ≈ <b>83 ps</b>: delay grows linearly with fanout, offset by the fixed wire load.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A chip's supply current steps by 1 A for 2 ns whenever a block wakes up, and the supply inductance prevents the regulator from responding that fast. What decoupling capacitance keeps the supply droop under 50 mV during the step?</p></ask>
+<sol><p>The capacitor must supply Q = I·Δt = 1 A × 2 ns = 2 nC while its voltage drops at most ΔV = 0.05 V: C = Q/ΔV = 2 × 10⁻⁹/0.05 = <b>40 nF</b>. In practice several smaller capacitors are used in parallel, because a capacitor's own series inductance limits how fast it can deliver charge.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A PWM output at 62.5 kHz with 50% duty cycle and 5 V amplitude is smoothed by an RC low-pass. Choose f<sub>c</sub> so the ripple's fundamental component is about 1% of its unfiltered amplitude, then estimate the ripple and how long the output takes to settle after the duty cycle changes.</p></ask>
+<hint><p>A 50% square wave of amplitude V has a fundamental sinusoid of amplitude (2/π)V. Far above f<sub>c</sub> a first-order low-pass attenuates by about f<sub>c</sub>/f.</p></hint>
+<sol><p>Attenuation of 1/100 at 62.5 kHz needs f<sub>c</sub> ≈ <b>625 Hz</b> (for example R = 2.5 kΩ, C = 100 nF). The fundamental has amplitude (2/π) × 5 ≈ 3.2 V, so the remaining ripple is about <b>32 mV</b> amplitude. τ = 1/(2πf<sub>c</sub>) ≈ 255 μs, so settling to within 1% takes about 5τ ≈ <b>1.3 ms</b>. Lower f<sub>c</sub> means less ripple and slower response; a second-order filter improves the trade-off.</p></sol>
+</prob>
+<prob level="hard">
+<ask><p>A button is connected through a 10 kΩ pull-up with a 1 μF capacitor from the input to ground. Pressing the button shorts the capacitor to ground through 100 Ω. The input is a Schmitt trigger with thresholds 3.0 V (rising) and 1.5 V (falling) at 5 V. How long after a press does the input read 0, and how long after release does it read 1? Can 5 ms of contact bounce after release cause a false reading?</p></ask>
+<sol><p>Press: discharge through 100 Ω (the 10 kΩ path is negligible), τ = 100 μs. Falling below 1.5 V: t = τ ln(5/1.5) ≈ <b>0.12 ms</b>. Release: charge through 10 kΩ, τ = 10 ms. Rising past 3.0 V: t = 10 ms × ln(5/2) ≈ <b>9.2 ms</b>. Bounce during release briefly reconnects the capacitor to ground, which can reset the charging, but no edge reaches the input until the contacts have been open long enough for the voltage to climb from below 1.5 V past 3.0 V (about 6 ms of uninterrupted charging), and the hysteresis prevents chatter near the threshold. The input sees one clean edge.</p></sol>
+</prob>
+</practice>
+</module>
