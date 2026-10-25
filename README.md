@@ -2,7 +2,7 @@
 
 An interactive study guide to digital hardware, from how a voltage becomes a bit to how a GPU runs thousands of threads. It is written for students and for engineers preparing for hardware, embedded and chip-design interviews.
 
-**Read it online:** https://YOUR-USERNAME.github.io/gate-to-gpu/ (replace with your GitHub Pages address)
+**Read it online:** https://ashahvos.github.io/gate-to-gpu/
 
 ## What is inside
 
